@@ -7,6 +7,9 @@ Unofficial, not affiliated with ExpressVPN. Tested on Bazzite in August 2026,
 installing 14.1.1+13156 and upgrading it in place to 14.2.1+13658. x86_64 only —
 the scripts use the `x64/` tree inside the package.
 
+Dedicated to the public domain under CC0 1.0 (see `LICENSE` in this directory):
+copy, modify or republish this content freely, with or without attribution.
+
 ## Why these scripts exist
 
 ExpressVPN no longer publishes `.rpm` or `.deb` packages. The only thing a Linux
