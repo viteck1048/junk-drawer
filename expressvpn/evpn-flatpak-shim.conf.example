@@ -1,0 +1,6 @@
+# evpn-flatpak-shim config: "<flatpak-app-id> <synthetic-host-path>"
+# Install as /etc/evpn-flatpak-shim.conf (root-owned, world-readable is fine).
+# The synthetic path is never read or executed -- it only needs to be a
+# string you can also enter/select in ExpressVPN's split-tunnel app list.
+org.mozilla.firefox /opt/flatpak-apps/org.mozilla.firefox
+com.brave.Browser /opt/flatpak-apps/com.brave.Browser
