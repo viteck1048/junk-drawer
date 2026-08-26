@@ -1,0 +1,121 @@
+#java
+NPP_CONSOLE -
+NPP_SAVE
+cd "$(CURRENT_DIRECTORY)"
+NPP_CONSOLE +
+c:\Program Files\Java\jdk-16.0.2\bin\javac.exe $(FILE_NAME)
+NPP_CONSOLE -
+if $(EXITCODE) !=0 goto exit
+NPP_CONSOLE +
+c:\Program Files\Java\jdk-16.0.2\bin\java.exe $(NAME_PART)
+NPP_CONSOLE -
+:exit
+NPP_CONSOLE +
+if "$(EXITCODE)" == "0"
+//NPP_CONSOLE 0
+endif
+
+#mingv
+NPP_CONSOLE -
+NPP_SAVE
+CD $(CURRENT_DIRECTORY)
+NPP_CONSOLE +
+c:\Program Files\mingw64\bin\g++.exe -g "$(FILE_NAME)" -static-libgcc  -static-libstdc++ -o "$(NAME_PART)_gcc.exe" 
+NPP_CONSOLE -
+if "$(EXITCODE)" == "0"
+//  NPP_CONSOLE +
+    cmd.exe /C "SET FLAG="qwerty" && SET FILE_N=$(NAME_PART)&& SET FILE_D=$(CURRENT_DIRECTORY)&& "C:\Program Files\Notepad++\run.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
+
+#nasm (with ms-link)
+NPP_CONSOLE -
+NPP_SAVE
+cd "$(CURRENT_DIRECTORY)"
+NPP_CONSOLE +
+C:\Program Files\NASM\nasm.exe -fwin32 "$(FILE_NAME)"
+NPP_CONSOLE -
+if "$(EXITCODE)" == "0"
+    NPP_CONSOLE +
+    cmd.exe /c "SET FILE_D=$(CURRENT_DIRECTORY) &&  SET FLAG="qwerty" && SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\link.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+//  NPP_CONSOLE +
+    cmd.exe /c "SET FILE_D=$(CURRENT_DIRECTORY)&& SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\run.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
+
+#nsis
+NPP_CONSOLE -
+NPP_SAVE
+cd "$(CURRENT_DIRECTORY)"
+NPP_CONSOLE +
+c:\Program Files (x86)\NSIS\makensisw.exe $(FILE_NAME)
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
+
+#msvs
+NPP_CONSOLE -
+NPP_SAVE
+NPP_CONSOLE +
+cmd.exe /c "SET FILE_NAME="$(FILE_NAME)" && SET FILE_D=$(CURRENT_DIRECTORY) && SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\trans_2.bat""
+NPP_CONSOLE -
+if "$(EXITCODE)" == "0"
+    NPP_CONSOLE +
+    cmd.exe /c "SET FILE_D=$(CURRENT_DIRECTORY) && SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\link.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+//  NPP_CONSOLE +
+//    cmd.exe /c "SET FILE_D=$(CURRENT_DIRECTORY)&& SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\run.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
+
+#msvs-unicode
+NPP_CONSOLE -
+NPP_SAVE
+NPP_CONSOLE +
+cmd.exe /c "SET FILE_NAME="$(FILE_NAME)" && SET FILE_D=$(CURRENT_DIRECTORY) && SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\trans.bat""
+NPP_CONSOLE -
+if "$(EXITCODE)" == "0"
+    NPP_CONSOLE +
+    cmd.exe /c "SET FILE_D=$(CURRENT_DIRECTORY) && SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\link.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+//  NPP_CONSOLE +
+    cmd.exe /c "SET FILE_D=$(CURRENT_DIRECTORY)&& SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\run.bat""
+    NPP_CONSOLE -
+endif
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
+
+#msvs-trans
+NPP_CONSOLE -
+NPP_SAVE
+NPP_CONSOLE +
+cmd.exe /c "SET FILE_NAME="$(FILE_NAME)" && SET FILE_D="$(CURRENT_DIRECTORY)"&& SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\trans_2.bat""
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
+
+#msvs-trans unicode
+NPP_CONSOLE -
+NPP_SAVE
+NPP_CONSOLE +
+cmd.exe /c "SET FILE_NAME="$(FILE_NAME)" && SET FILE_D=$(CURRENT_DIRECTORY) && SET FILE_N=$(NAME_PART)&&"C:\Program Files\Notepad++\trans.bat""
+if "$(EXITCODE)" == "0"
+NPP_CONSOLE 0
+endif
