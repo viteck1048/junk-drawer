@@ -21,8 +21,10 @@ sudo systemctl reboot
 ############################
 
 # updating / reinstalling: just run the wrapper script, it auto-detects
-# the newest expressvpn-linux-universal*_release.run in Завантажене/Downloads
-# and does everything below automatically (still needs sudo interactively)
+# the newest expressvpn-linux-universal*_release.run and does everything
+# below automatically (still needs sudo interactively).
+# Where it looks: the XDG download dir (xdg-user-dir DOWNLOAD -- whatever the
+# folder is called in the current locale), then ~/Downloads, then ~
 
 expressvpn-update.sh
 # or, with an explicit package path:
@@ -37,7 +39,7 @@ expressvpn-update.sh
 
 # unpacking *.run and installing expressvpn manually (x64 version)
 
-(cd Завантажене)
+(cd "$(xdg-user-dir DOWNLOAD)")
 ./expressvpn-linux-universal-14.2.1.13658_release.run --noexec --keep --target /tmp/expressvpn
 
 # Creating the necessary groups (skip if already installed/updating)

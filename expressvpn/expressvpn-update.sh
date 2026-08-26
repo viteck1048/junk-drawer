@@ -8,7 +8,32 @@
 
 set -euo pipefail
 
-SEARCH_DIRS=("$HOME/Завантажене" "$HOME/Downloads" "$HOME")
+# Downloads dir comes from the XDG user-dirs spec, not from a hard-coded
+# folder name -- the localized name ("Завантажене", "Descargas", ...) lives in
+# ~/.config/user-dirs.dirs and differs per user locale.
+xdg_download_dir() {
+    local d=""
+    if command -v xdg-user-dir >/dev/null 2>&1; then
+        d=$(xdg-user-dir DOWNLOAD 2>/dev/null || true)
+    fi
+    # xdg-user-dir falls back to $HOME when the entry is unset; so does a
+    # missing binary -- in both cases read the config file ourselves.
+    if [[ -z "$d" || "$d" == "$HOME" ]]; then
+        local f="${XDG_CONFIG_HOME:-$HOME/.config}/user-dirs.dirs"
+        [[ -r "$f" ]] && d=$(
+            . "$f" >/dev/null 2>&1
+            printf '%s' "${XDG_DOWNLOAD_DIR:-}"
+        )
+    fi
+    printf '%s' "$d"
+}
+
+SEARCH_DIRS=()
+for d in "$(xdg_download_dir)" "$HOME/Downloads" "$HOME"; do
+    [[ -n "$d" && "$d" != "$HOME/" ]] || continue
+    [[ " ${SEARCH_DIRS[*]-} " == *" $d "* ]] || SEARCH_DIRS+=("$d")
+done
+
 WORKDIR="/tmp/expressvpn_update"
 
 if [[ $# -ge 1 ]]; then
