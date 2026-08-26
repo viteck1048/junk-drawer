@@ -1,0 +1,75 @@
+# Тема GRUB під 3840x2160 / 333 PPI
+# Кегль 48 px обраний емпірично: читається, псевдографіка стикується без розривів.
+
+title-text: ""
+desktop-image: "background.jpg"
+desktop-image-scale-method: "stretch"
+desktop-color: "#000000"
+
+# Термінал (клавіші "c" та "e") — лише Regular, щоб не з'їхало вирівнювання
+terminal-font: "DejaVu Sans Mono Regular 48"
+terminal-left: "3%"
+terminal-top: "3%"
+terminal-width: "94%"
+terminal-height: "94%"
+terminal-border: "0"
+
++ label {
+    id       = "__title__"
+    left     = 0
+    top      = "5%"
+    width    = "100%"
+    align    = "center"
+    text     = "Debian GNU/Linux"
+    font     = "DejaVu Sans Mono Bold 72"
+    color    = "#e0e0e0"
+}
+
++ boot_menu {
+    left  = "18%"
+    top   = "18%"
+    width = "64%"
+    height = "30%"
+
+    item_font          = "DejaVu Sans Mono Regular 48"
+    selected_item_font = "DejaVu Sans Mono Regular 48"
+    item_color          = "#b8b8b8"
+    selected_item_color = "#ffffff"
+
+    item_height  = 84
+    item_spacing = 14
+    item_padding = 28
+
+    icon_width      = 0
+    icon_height     = 0
+    item_icon_space = 0
+
+    menu_pixmap_style          = "menu_*.png"
+    selected_item_pixmap_style = "select_*.png"
+
+    scrollbar = false
+}
+
++ progress_bar {
+    id     = "__timeout__"
+    left   = "18%"
+    top    = "80%"
+    width  = "64%"
+    height = 76
+    font   = "DejaVu Sans Mono Regular 40"
+    text   = "@TIMEOUT_NOTIFICATION_LONG@"
+    fg_color     = "#e0e0e0"
+    bg_color     = "#202020"
+    border_color = "#585858"
+    text_color   = "#e0e0e0"
+}
+
++ label {
+    left  = 0
+    top   = "90%"
+    width = "100%"
+    align = "center"
+    text  = "↑↓ вибір     Enter завантажити     e редагувати     c консоль"
+    font  = "DejaVu Sans Mono Regular 40"
+    color = "#909090"
+}
