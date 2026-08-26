@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""
+recv — прийом програми з Sinumerik у файл. Обгортка над `sniff` цього каталогу.
+
+Поділ обовʼязків:
+  sniff — слухає лінію й повертає сирі байти, як вони прийшли. Нічого не знає
+          про керування й нічого не пише на диск.
+  recv  — знає, що саме за керування на тому кінці, і розбирає почуте: для
+          Sinumerik лінія 7E1, тож восьмий біт кожного байта — це біт парності,
+          а не дані. Знімаємо його, інакше пробіл (0x20) лягає у файл як 0xA0.
+
+Обидва файли лежать поруч і переносяться разом із каталогом верстата; `recv`
+підвантажує `sniff` за власним шляхом, а не з системи, щоб копія каталогу
+працювала сама.
+
+Порядок на стійці (нормальний режим, не Inbetriebnahme):
+  DATEN EIN-AUS -> DATEN-AUSGABE -> Ausgabeschnittstelle 1, номер програми
+  -> START. Під час видачі CTS стійки лежить у нулі — так і має бути,
+  RTS у 810/820 лишається нулем, поки вона віддає.
+"""
+import argparse, datetime, os, re, sys
+from importlib.machinery import SourceFileLoader
+import importlib.util
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def load_sniff():
+    """Підвантажити сусідній `sniff` як модуль.
+
+    Файл без розширення .py, тож потрібен явний loader. Шлях — від
+    realpath(__file__): каталог верстата самодостатній, з системи нічого.
+    """
+    path = os.path.join(HERE, "sniff")
+    if not os.path.exists(path):
+        sys.exit("sniff not found next to this script: " + path)
+    spec = importlib.util.spec_from_file_location(
+        "sniff", path, loader=SourceFileLoader("sniff", path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def main():
+    sniff = load_sniff()
+
+    p = argparse.ArgumentParser(
+        prog="recv",
+        description="receive a part program from the Sinumerik into a file "
+                    "(7E1: the parity bit is stripped)")
+    p.add_argument("file", nargs="?",
+                   help="output file; without it: <date>_<size>B.nc "
+                        "in the current directory")
+    p.add_argument("--port", help="port node, e.g. /dev/ttyS0; without it the port is "
+                                  "auto-detected, but only if there is exactly one")
+    p.add_argument("-b", "--baud", type=int, default=sniff.DEFAULT_BAUD)
+    p.add_argument("--wait", type=float, default=600.0,
+                   help="how long to wait for the first byte, s")
+    p.add_argument("--idle", type=float, default=sniff.DEFAULT_IDLE,
+                   help="silence means end of data, s")
+    p.add_argument("--dc1", action=argparse.BooleanOptionalAction, default=True,
+                   help="send DC1 every 2 s while waiting for data")
+    args = p.parse_args()
+
+    raw = sniff.capture(port=args.port, baud=args.baud,
+                        wait=args.wait, idle=args.idle, dc1=args.dc1)
+    if not raw:
+        return 1
+
+    # 7E1: восьмий біт — парність. Знімаємо завжди, бо це властивість лінії
+    # цього верстата, а не властивість конкретного файлу.
+    data = bytes(b & 0x7F for b in raw)
+
+    # Перевірка не заради прапорця, а щоб не змовчати про несподіванку:
+    # у 7E1 кожен байт має парну кількість одиниць. Якщо це не так — швидкість
+    # або формат не ті, і знятий біт міг бути даними.
+    odd = sum(1 for b in raw if bin(b).count("1") % 2)
+    if odd:
+        print(f"WARNING: {odd}/{len(raw)} bytes do not have even parity -- "
+              "the line is not 7E1 as assumed. Check the baud rate with ./sniff; "
+              "the file is written anyway.")
+
+    # Лідер і хвіст із NUL — рідна форма цього керування, воно так і віддає
+    # (і так само виглядають файли відновлення). Але на виході в нас текстовий
+    # .nc, який відкривають редактором, а не дамп трафіку, тож нулі геть.
+    lead = len(data) - len(data.lstrip(b"\x00"))
+    tail = len(data) - len(data.rstrip(b"\x00"))
+    data = data.strip(b"\x00")
+    if lead or tail:
+        print(f"stripped NUL: leader {lead} B, trailer {tail} B")
+
+    # Нуль усередині тіла — це вже не лідер, а або збій на лінії, або не той
+    # формат. Прибираємо теж (у тексті йому нема місця), але мовчати не можна.
+    inner = data.count(0)
+    if inner:
+        print(f"WARNING: {inner} NUL bytes inside the program body -- "
+              "not a leader, so either a line glitch or the wrong format. "
+              "Removed; check the file before sending it back.")
+        data = data.replace(b"\x00", b"")
+
+    # Кінці рядків. Стійка віддає LF CR CR — у редакторі це зайві порожні
+    # рядки. Будь-який зліпок CR/LF рахуємо за один розділювач кадрів і
+    # зводимо до CRLF; файл закінчується одним CRLF.
+    blocks = [b for b in re.split(rb"[\r\n]+", data) if b]
+    data = b"\r\n".join(blocks) + b"\r\n" if blocks else b""
+    print(f"line endings normalised to CRLF, {len(blocks)} blocks")
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = args.file or f"{ts}_{len(data)}B.nc"
+    path = os.path.abspath(path)
+    if os.path.exists(path):
+        sys.exit(f"refusing to overwrite an existing file: {path}")
+
+    with open(path, "wb") as f:
+        f.write(data)
+    print(f"saved: {path}  ({len(data)} B)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

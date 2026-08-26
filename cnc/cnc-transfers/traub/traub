@@ -1,0 +1,447 @@
+#!/usr/bin/env python3
+"""
+traub — обмін УП з Traub TX8 по V24 (Protocol 2), 1200 7E1 + XON/XOFF.
+
+Двигун каталогу. Назовні його не викликають: на щодень є обгортки `./send` і
+`./recv`, і рівно вони — два єдині входи цього каталогу.
+
+Підкоманди:
+  ports                 показати послідовні порти, які видно в системі
+  lines                 показати стан модемних ліній
+  recv    [FILE]        прийняти програму з верстата
+  send    FILE          залити програму у верстат
+  renumber FILE NNN     побайтово змінити номер програми (O-номер)
+
+Особливості протоколу, зафіксовані на живому верстаті:
+  * прийом: DC1 треба слати повторно — керування ловить його лише вже
+    перебуваючи в режимі видачі; між leader'ом і тілом пауза >6 с;
+  * заливка: чекати DC1 від верстата; DC3 після кінцевого '%' означає
+    "прийом завершено", а не "пауза" — DC1 після нього не буде;
+  * DTR/RTS тримаються високими статично, апаратний хендшейк вимкнено;
+  * приймаємо в сирому 8N1: парність перевіряємо самі, інакше збійний
+    байт не відрізнити від справжнього NUL чистої стрічки.
+"""
+import argparse, collections, datetime, fcntl, glob, os, re, select, struct, sys, termios, time
+
+# Шляхи — від самого файлу, а не від домівки: каталог верстата має працювати
+# з будь-якого місця, куди його скопіюють. realpath, щоб і виклик через симлінк
+# писав стрічки в репозиторій, а не поруч із симлінком.
+HERE = os.path.dirname(os.path.realpath(__file__))
+DEFAULT_OUTDIR = os.path.join(HERE, "tapes")
+DC1, DC3 = 0x11, 0x13
+TIOCMGET, TIOCMBIS = 0x5415, 0x5416
+M_DTR, M_RTS, M_CTS, M_DSR, M_DCD = 0x002, 0x004, 0x020, 0x100, 0x040
+
+
+# ---------------------------------------------------------------- порт
+# Порт шукаємо в системі, а не за моделлю перехідника. Біля верстата він буде
+# рідний (на матплаті) або з плати розширення; USB-перехідник — властивість
+# конкретного лаптопа, а не стека.
+#
+#   --port вказано        -> беремо його, нічого не шукаємо;
+#   знайдено рівно один   -> беремо мовчки;
+#   знайдено більше       -> ПОВНА ВІДМОВА зі списком портів.
+#
+# Відмова жорстка навмисно: за трьома портами одного PC стоять три різні
+# верстати, і «здогадався сам» там означає «програма поїхала не в той верстат».
+
+UART = {"1": "8250", "2": "16450", "3": "16550", "4": "16550A", "5": "Cirrus",
+        "6": "16650", "7": "16650V2", "8": "16750", "9": "StarTech",
+        "10": "16C950", "11": "16654", "12": "16850", "13": "RSA"}
+
+
+def _sysfs(dev, attr):
+    try:
+        with open(f"/sys/class/tty/{dev}/{attr}") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _by_id(node):
+    """Стабільне імʼя з /dev/serial/by-id, якщо для вузла таке є."""
+    for link in sorted(glob.glob("/dev/serial/by-id/*")):
+        if os.path.realpath(link) == node:
+            return os.path.basename(link)
+    return ""
+
+
+def _natkey(node):
+    """ttyS10 має йти після ttyS2, а не між ttyS1 і ttyS2."""
+    m = re.search(r"\d+$", node)
+    return (re.sub(r"\d+$", "", node), int(m.group()) if m else -1)
+
+
+def list_ports():
+    """[(вузол, опис)] — порти, за якими справді є залізо.
+
+    /dev/ttyS0..S3 ядро заводить завжди, навіть коли UART за ними нема.
+    Порожню заглушку видно по /sys/class/tty/ttySN/type == 0 (PORT_UNKNOWN).
+    Дивимось саме sysfs, а не ioctl, щоб не відкривати порт: відкритий порт
+    у цеху може бути чужим сеансом передачі, у який лізти не можна.
+    """
+    out = []
+    for node in sorted(glob.glob("/dev/ttyS*"), key=_natkey):
+        dev = os.path.basename(node)
+        t = _sysfs(dev, "type")
+        if not t or t == "0":
+            continue
+        where = os.path.basename(os.path.realpath(f"/sys/class/tty/{dev}/device"))
+        out.append((node, f"UART {UART.get(t, 'type ' + t)}  {where}"))
+    for node in sorted(glob.glob("/dev/ttyUSB*"), key=_natkey):
+        out.append((node, "USB  " + (_by_id(node) or "adapter")))
+    return out
+
+
+def _acm():
+    """CDC-ACM у рахунок не беремо: це й модем, і Arduino, і сканер відбитків.
+    Відрізнити звідси справжній перехідник RS232 від решти неможливо."""
+    return sorted(glob.glob("/dev/ttyACM*"), key=_natkey)
+
+
+def find_port(explicit=None):
+    if explicit:
+        if not os.path.exists(explicit):
+            sys.exit(f"no such port: {explicit}")
+        return explicit
+    ports = list_ports()
+    if not ports:
+        sys.exit("no serial port found.\n"
+                 "  empty ttyS0..3 do not count: no hardware behind them (type=0)"
+                 + (f"\n  found {' '.join(_acm())} (CDC-ACM); if that is the"
+                    " adapter, name it with --port" if _acm() else ""))
+    if len(ports) > 1:
+        sys.exit("more than one port -- name the one you need with --port:\n"
+                 + "\n".join(f"  {n:16s} {d}" for n, d in ports)
+                 + "\nWhich port belongs to which machine: write it into NOTES.md.")
+    print(f"port {ports[0][0]} auto-detected  ({ports[0][1]})")
+    return ports[0][0]
+
+
+def cmd_ports(args):
+    """Показати порти, нічого не відкриваючи."""
+    ports = list_ports()
+    for node, desc in ports:
+        print(f"  {node:16s} {desc}")
+    if not ports:
+        print("  no port with hardware behind it")
+    if _acm():
+        print("  ignored (CDC-ACM, usually not RS232): " + " ".join(_acm()))
+    return 0
+
+
+def open_port(path, eight_bit):
+    """eight_bit=True -> сирий 8N1 (для прийому з ручною перевіркою парності);
+       eight_bit=False -> 7E1 (для передачі, парність генерує ядро)."""
+    fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    os.set_blocking(fd, True)
+    a = termios.tcgetattr(fd)
+    cflag = termios.CREAD | termios.CLOCAL | termios.HUPCL
+    cflag |= termios.CS8 if eight_bit else (termios.CS7 | termios.PARENB)
+    a[0] = 0          # без IXON/IXOFF: потоком керуємо самі, інакше ядро зʼїдає DC1/DC3
+    a[1] = 0
+    a[2] = cflag
+    a[3] = 0
+    a[4] = a[5] = termios.B1200
+    a[6][termios.VMIN] = 0
+    a[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, a)
+    fcntl.ioctl(fd, TIOCMBIS, struct.pack("I", M_DTR | M_RTS))
+    time.sleep(0.2)
+    termios.tcflush(fd, termios.TCIFLUSH)
+    return fd
+
+
+def modem(fd):
+    return struct.unpack("I", fcntl.ioctl(fd, TIOCMGET, struct.pack("I", 0)))[0]
+
+
+def poll(fd, t):
+    r, _, _ = select.select([fd], [], [], t)
+    return os.read(fd, 4096) if r else b""
+
+
+def check_parity(data):
+    """Повертає позиції байтів, у яких не збігається парна парність."""
+    return [i for i, b in enumerate(data) if bin(b).count("1") % 2]
+
+
+def strip_parity(data):
+    return bytes(b & 0x7F for b in data)
+
+
+def prog_number(tape):
+    m = re.search(rb"^O(\d+)", strip_parity(tape).lstrip(b"\x00%\r\n"), re.M)
+    return m.group(1).decode() if m else None
+
+
+# ---------------------------------------------------------------- lines
+def cmd_lines(args):
+    fd = open_port(find_port(args.port), True)
+    for _ in range(args.count):
+        st = modem(fd)
+        print("  ".join(f"{n}={'1' if st & m else '0'}" for n, m in
+                        [("DTR", M_DTR), ("RTS", M_RTS), ("CTS", M_CTS),
+                         ("DSR", M_DSR), ("DCD", M_DCD)]))
+        time.sleep(0.5)
+    os.close(fd)
+    return 0
+
+
+# ---------------------------------------------------------------- recv
+def cmd_recv(args):
+    # FILE і -o кажуть те саме різними словами. Мовчки вибрати один означало б
+    # покласти стрічку не туди, куди чекає оператор.
+    if args.file and args.outdir != DEFAULT_OUTDIR:
+        sys.exit("FILE and -o say the same thing -- give one of them, not both")
+    # Перевіряємо ДО відкриття порту. Інакше верстат віддасть усю стрічку, а
+    # оператор дізнається, що писати нікуди, аж коли передача вже позаду.
+    if args.file:
+        for p in (os.path.abspath(args.file), os.path.abspath(args.file) + ".raw"):
+            if os.path.exists(p):
+                sys.exit(f"refusing to overwrite an existing file: {p}")
+
+    port = find_port(args.port)
+    fd = open_port(port, True)                      # сирий 8N1
+    print(f"port {port}, 1200 8N1 (parity checked in software)")
+    print(f"CTS={'1' if modem(fd) & M_CTS else '0'}  "
+          f"DSR={'1' if modem(fd) & M_DSR else '0'}")
+    print("sending DC1 every 2 s -- put the control into OUTPUT mode", flush=True)
+
+    buf = bytearray()
+    deadline = time.time() + args.wait
+    next_dc1 = 0.0
+    reason = "timed out waiting for data"
+
+    while True:
+        if not buf and time.time() >= next_dc1:
+            os.write(fd, bytes([DC1]))
+            next_dc1 = time.time() + 2.0
+        chunk = poll(fd, 0.5)
+        if chunk:
+            if not buf:
+                print("data started", flush=True)
+            buf += chunk
+            deadline = time.time() + args.idle
+            continue
+        if buf:
+            # B 2.11(f): кінець передачі — верстат знімає RTS (наш CTS падає)
+            if not modem(fd) & M_CTS:
+                reason = "machine dropped RTS -- end of data, B 2.11(f)"
+                break
+            # обидва маркери стрічки на місці й лінія стихла
+            body = strip_parity(buf).strip(b"\x00")
+            if body.count(b"%") >= 2 and body.endswith(b"%"):
+                reason = "both '%' tape markers received"
+                break
+        if time.time() > deadline:
+            if buf:
+                reason = f"line idle for {args.idle:.0f} s"
+            break
+
+    os.close(fd)                                    # DC3 НЕ шлемо: це "пауза"
+    print(f"\nend: {reason}")
+    print(f"received: {len(buf)} B")
+    if not buf:
+        return 1
+
+    bad = check_parity(buf)
+    print(f"parity errors: {len(bad)}" + (f"  at {bad[:10]}" if bad else "  none"))
+
+    tape = strip_parity(buf)
+    body = tape.strip(b"\x00")
+    lead = len(tape) - len(tape.lstrip(b"\x00"))
+    trail = len(tape) - len(tape.rstrip(b"\x00"))
+    marks = body.count(b"%")
+    rows_n = body.count(b"\r\n") + 1
+    print(f"leader/trailer NULs: {lead}/{trail}   '%' markers: {marks}   lines: {rows_n}")
+
+    # Обидва файли пишемо завжди, з імʼям чи без: .raw — байт-точний архів із
+    # бітами парності, .tape — знята парність, готове до send. Одного .tape
+    # мало: коли парність не збіглась, звіряти вже немає з чим.
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.file:
+        # Названий файл: стрічка рівно туди, куди сказали, архів поруч. Суфікс
+        # додається, а не заміняє розширення, — щоб `x.tape` і `x.nc` не дали
+        # одного й того ж `x.raw`.
+        tape_p = os.path.abspath(args.file)
+        raw_p = tape_p + ".raw"
+        os.makedirs(os.path.dirname(tape_p) or ".", exist_ok=True)
+        open(raw_p, "wb").write(bytes(buf))
+        open(tape_p, "wb").write(tape)
+        print(f"\nraw dump : {raw_p}")
+        print(f"tape     : {tape_p}")
+    else:
+        os.makedirs(args.outdir, exist_ok=True)
+        num = prog_number(buf)
+        base = f"O{num}" if num else f"prog_{ts}"
+        raw_p = os.path.join(args.outdir, f"{base}_{ts}.raw")
+        tape_p = os.path.join(args.outdir, f"{base}_{ts}.tape")
+        open(raw_p, "wb").write(bytes(buf))
+        open(tape_p, "wb").write(tape)
+        print(f"\nraw dump : {raw_p}")
+        print(f"tape     : {tape_p}")
+        # Коротке імʼя для зручності, але наявний файл НЕ затираємо: інакше прийом
+        # знищує саме ту стрічку, з якої щойно робили заливку, і звіряти немає з чим.
+        short = os.path.join(args.outdir, f"{base}.tape")
+        if not os.path.exists(short):
+            open(short, "wb").write(tape)
+            print(f"also as  : {short}")
+        elif open(short, "rb").read() == tape:
+            print(f"identical to the existing {short}")
+        else:
+            print(f"WARNING: {short} exists and DIFFERS -- left untouched.\n"
+                  f"         compare:  cmp -l {short} {tape_p}")
+    if bad:
+        print("!! parity check failed -- do NOT send this tape back")
+        return 2
+    txt = body.replace(b"\x00", b"").decode("ascii", "replace")
+    rows = txt.replace("\r\n", "\n").split("\n")
+    print(f"\nfirst lines: {rows[:4]}")
+    print(f"last       : {rows[-4:]}")
+    return 0
+
+
+# ---------------------------------------------------------------- send
+def cmd_send(args):
+    data = open(args.file, "rb").read()
+    hi = [i for i, b in enumerate(data) if b > 127]
+    if hi:
+        sys.exit(f"REFUSED: {len(hi)} bytes >127 (first at {hi[0]}) -- the channel is 7-bit.\n"
+                 "Looks like the file was edited in a text editor.")
+    if data.strip(b"\x00").count(b"%") < 2:
+        sys.exit("REFUSED: fewer than two '%' markers in the tape -- did an editor eat the last one?")
+
+    port = find_port(args.port)
+    fd = open_port(port, False)                     # 7E1, парність генерує ядро
+    print(f"port {port}, 1200 7E1")
+    print(f"file {args.file}: {len(data)} B, program O{prog_number(data)}")
+    print("waiting for DC1 -- put the control into INPUT mode", flush=True)
+
+    deadline = time.time() + args.wait
+    while True:
+        got = poll(fd, 0.5)
+        if DC1 in got:
+            print("DC1 received, sending", flush=True)
+            break
+        if got:
+            print("  not DC1:", got.hex(" "), flush=True)
+        if time.time() > deadline:
+            os.close(fd)
+            sys.exit("timeout: the machine never asked for data")
+
+    i = paused = 0
+    t0 = time.time()
+    done = None
+    written = 0                                     # скільки байтів реально пішло в лінію
+    while i < len(data):
+        piece = data[i:i + args.chunk]
+        os.write(fd, piece)
+        termios.tcdrain(fd)                         # тримаємо реальний темп 1200 бод
+        written += len(piece)
+        i = min(i + args.chunk, len(data))
+        got = poll(fd, 0.0)
+        while DC3 in got:
+            if not data[i:].strip(b"\x00"):
+                # B 2.12(f): усе тіло разом із кінцевим '%' прийнято.
+                # Далі лише трейлерні нулі, які керування ігнорує. DC1 не буде.
+                done = f"machine confirmed end of data (DC3) at {i} B"
+                i = len(data)
+                got = b""
+                break
+            paused += 1
+            print(f"  DC3 at {i} B -- paused", flush=True)
+            rd = time.time() + args.resume
+            while True:
+                g2 = poll(fd, 0.5)
+                if DC1 in g2:
+                    print("  DC1 -- resuming", flush=True)
+                    got = b""
+                    break
+                if time.time() > rd:
+                    os.close(fd)
+                    sys.exit(
+                        f"machine did not resume after DC3 at {i}/{len(data)} B.\n"
+                        "DC3 in mid-body with no DC1 after it means the control "
+                        "refused to take more.\nMost common cause: CNC memory full.\n"
+                        f"WARNING: a partial program (~{i} B, without M30 and the "
+                        "final '%') is left in the machine -- delete it before "
+                        "sending again.")
+        if args.progress and i % 400 < args.chunk:
+            print(f"  {i}/{len(data)} B", flush=True)
+
+    termios.tcdrain(fd)
+    dt = time.time() - t0
+    print(f"\n{done or 'whole file sent'}")
+    skipped = len(data) - written
+    print(f"sent {written}/{len(data)} B in {dt:.1f} s, DC3 pauses: {paused}"
+          + (f"  (last {skipped} B of trailing NULs were not needed)" if skipped else ""))
+    time.sleep(1.5)
+    tail = poll(fd, 1.0)
+    print("after end:", tail.hex(" ") if tail else "(silence)",
+          f" CTS={'1' if modem(fd) & M_CTS else '0'}")
+    os.close(fd)
+    return 0
+
+
+# ---------------------------------------------------------------- renumber
+def cmd_renumber(args):
+    data = open(args.file, "rb").read()
+    old = prog_number(data)
+    if not old:
+        sys.exit("no line with an O-number found")
+    new = args.number.lstrip("Oo")
+    pat = re.compile(rb"(^|\r\n)O" + old.encode() + rb"(?=[ \r\n])")
+    out, n = pat.subn(lambda m: m.group(1) + b"O" + new.encode(), data, count=1)
+    if not n:
+        sys.exit("could not replace the number byte-wise")
+    dst = args.output or args.file
+    open(dst, "wb").write(out)
+    print(f"O{old} -> O{new}   {dst}  ({len(out)} B, was {len(data)} B)")
+    print(f"NUL={out.count(0)}  '%'={out.count(b'%')}  bytes>127={sum(1 for b in out if b > 127)}")
+    return 0
+
+
+def main():
+    p = argparse.ArgumentParser(prog="traub", description="NC program transfer with Traub TX8 over RS232")
+    p.add_argument("--port", help="port node, e.g. /dev/ttyS0; without it the port is "
+                                  "auto-detected, but only if there is exactly one")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("ports", help="list the serial ports visible in the system")
+    s.set_defaults(fn=cmd_ports)
+
+    s = sub.add_parser("lines", help="show modem line state")
+    s.add_argument("-n", "--count", type=int, default=3)
+    s.set_defaults(fn=cmd_lines)
+
+    s = sub.add_parser("recv", help="receive a program from the machine")
+    s.add_argument("file", nargs="?",
+                   help="output tape; the byte-exact archive goes next to it as "
+                        "FILE.raw. Without it: tapes/ named after the O-number")
+    s.add_argument("-o", "--outdir", default=DEFAULT_OUTDIR)
+    s.add_argument("--wait", type=float, default=600.0, help="how long to wait for the first byte, s")
+    s.add_argument("--idle", type=float, default=15.0,
+                   help="silence means end of data, s (must be >6: there is a pause after the leader)")
+    s.set_defaults(fn=cmd_recv)
+
+    s = sub.add_parser("send", help="send a program to the machine")
+    s.add_argument("file")
+    s.add_argument("--wait", type=float, default=600.0, help="how long to wait for DC1, s")
+    s.add_argument("--resume", type=float, default=120.0)
+    s.add_argument("--chunk", type=int, default=16)
+    s.add_argument("--progress", action="store_true", default=True)
+    s.set_defaults(fn=cmd_send)
+
+    s = sub.add_parser("renumber", help="change the O-number byte-wise")
+    s.add_argument("file")
+    s.add_argument("number")
+    s.add_argument("-o", "--output")
+    s.set_defaults(fn=cmd_renumber)
+
+    args = p.parse_args()
+    sys.exit(args.fn(args) or 0)
+
+
+if __name__ == "__main__":
+    main()

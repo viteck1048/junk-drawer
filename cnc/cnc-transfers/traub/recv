@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""
+recv — обгортка над `./traub recv` цього каталогу.
+
+Навіщо вона тут, якщо нічого не підставляє. Заради однакової будови каталогів:
+у кожному верстаті команди звуться однаково — `./send`, `./recv`, — і біля
+верстата не треба згадувати, у якого з них інструмент зветься `traub`,
+а в якого `sinumerik`. Уся різниця живе всередині обгортки, а не в памʼяті
+оператора.
+
+Чому не над `sniff`, як у каталозі Sinumerik. Там прийом і є розбором знятого
+з лінії: `sniff` віддає байти, `recv` знімає біт парності — і все. Тут прийом
+знає про протокол більше, ніж може знати чистий слухач, і це знання перевірене
+на живому верстаті:
+
+  * кінець передачі видно по падінню CTS — верстат знімає RTS (мануал B 2.11(f));
+  * і другим шляхом: обидва маркери `%` на місці й лінія стихла;
+  * поруч зі стрічкою пишеться байт-точний `.raw` з бітами парності;
+  * стрічка з помилками парності НЕ віддається назад у верстат (код виходу 2).
+
+Переписувати це під `sniff` означало б переробляти єдиний перевірений на
+верстаті шлях прийому заради симетрії каталогів. Тому тут інакше: `sniff`
+лишається чистою діагностикою лінії, а прийом іде через двигун каталогу — так
+само, як `./send` іде через нього ж.
+
+Що вона таки робить: друкує повну команду перед запуском — щоб було видно, що
+саме пішло на верстат.
+"""
+import os, subprocess, sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TOOL = os.path.join(HERE, "traub")
+
+# Прапорці самого інструмента, а не підкоманди: мусять стояти ПЕРЕД словом
+# `recv`, інакше argparse відмовляє. Значення True = прапорець зі значенням.
+GLOBAL = {"--port": True}
+
+HELP = """usage: recv [options] [FILE]
+
+Receive an NC program from the Traub TX8. Wrapper around './traub recv'.
+
+Without FILE the tape lands in tapes/, named after the program's O-number.
+With FILE it lands exactly there, and the byte-exact archive next to it as
+FILE.raw. An existing file is never overwritten.
+
+Two files every time: .raw keeps the parity bits as they came off the wire,
+.tape has them stripped and is what './send' takes. A tape with parity errors
+is written but reported, and the exit code is 2 -- do not send it back.
+
+Substitutes nothing: the tool's own defaults are already right for this
+machine. Note --idle is 15 s and must not be lowered below 6 -- the machine
+pauses after the tape leader, and a short --idle ends the receive right there
+while still looking like success.
+
+Options are passed through unchanged -- see './traub recv --help'.
+
+Run this FIRST, then start the output on the machine.
+"""
+
+
+def main():
+    argv = sys.argv[1:]
+
+    # Порожній виклик — нормальна робоча команда, а не помилка: імʼя файлу тут
+    # необовʼязкове. Цим `recv` відрізняється від `send`, якому файл потрібен.
+    if "-h" in argv or "--help" in argv:
+        print(HELP, end="")
+        return 0
+
+    if not os.access(TOOL, os.X_OK):
+        sys.exit(f"tool not found or not executable: {TOOL}")
+
+    out, glob = [], []
+    skip = -1
+    for k, a in enumerate(argv):
+        if k == skip:
+            continue
+        base = a.split("=", 1)[0]
+        if base in GLOBAL:
+            glob.append(a)
+            if GLOBAL[base] and "=" not in a:
+                if k + 1 >= len(argv):
+                    sys.exit(f"{a} needs a value")
+                glob.append(argv[k + 1])
+                skip = k + 1
+            continue
+        out.append(a)
+
+    cmd = [TOOL] + glob + ["recv"] + out
+    print("+ " + " ".join(cmd), flush=True)
+    return subprocess.call(cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

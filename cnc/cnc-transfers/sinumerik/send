@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""
+send — обгортка над `./sinumerik send` цього каталогу.
+
+Навіщо. Типові значення самого інструмента для цієї стійки не підходять, і
+щоразу дописувати прапорці руками — це рано чи пізно забути один із них біля
+верстата. Обгортка знає два режими цієї стійки й підставляє потрібний набір.
+
+**Заливка в памʼять програм** (типово):
+
+    --gate 90     чекати START на стійці (в інструменті типово 0, тобто «шли одразу»)
+    --wait 0      не чекати DC1 (ця стійка сама його не шле)
+    --stall 1000  терпіти опущений CTS
+    --gcode       розбір під керуючу програму
+
+**BTR, пряме виконання з дроту** (`--dnc`) — процедура, перевірена на верстаті
+2026-08-07:
+
+    --gate 300    5 хвилин на послідовність BTR START -> NC START біля стійки
+    --wait 0      DC1 стійка не шле; передачу відкриває підняттям CTS
+    --first 90    півтори хвилини на ПЕРШИЙ байт, далі помилка
+    --stall 0     після першого байта — чекати скільки треба, без таймауту
+    --resume 0    те саме для XOn після XOff
+    --linger 15   дослухати лінію після останнього байта
+    --gcode       розбір під керуючу програму
+
+`--dnc` у ядро НЕ передається: окремого DNC-формату в потоці не існує. Кадри
+там ті самі, що й при заливці в памʼять, разом із `%MPF…`-заголовком — стійка
+звіряє по ньому номер програми (аларм 33). `--dnc` тут лише імʼя набору
+параметрів, під яким його звик кликати оператор.
+
+Чому в BTR нема таймаутів після першого байта. Стійка виконує кадри одразу й
+паралельно набиває circular buffer; коли той повний — спиняє потік, поки не
+звільнить місце вже виконаними кадрами. Пауза тут означає роботу верстата, і
+її тривалість залежить від програми, а не від нас. Обірвати передачу по
+таймауту означає вбити справний прогін на середині. Перший байт — інша річ:
+поки він не пройшов, ніщо не доводить, що стійка взагалі в прийомі, тож там
+таймаут лишається.
+
+Що НЕ робить: нічого не вгадує за тебе. Якщо ти сам задав будь-який із цих
+прапорців — лишається твоє значення. Якщо задав `--trim-tail` (файли
+відновлення), `--gcode` не підставляється: в інструменті `--gcode` переважає
+`--trim-tail`, тож тиха підстановка зіпсувала б заливку TEA/PCP/ASM.
+
+Перед запуском друкує повну команду — щоб було видно, що саме пішло на верстат.
+"""
+import os, subprocess, sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TOOL = os.path.join(HERE, "sinumerik")
+
+# Набори значень, які підставляємо, якщо користувач не задав свого.
+MEMORY = {"--gate": "90", "--wait": "0", "--stall": "1000"}
+BTR = {"--gate": "300", "--wait": "0", "--first": "90",
+       "--stall": "0", "--resume": "0", "--linger": "15"}
+# Прапорці самого інструмента, а не підкоманди: вони мусять стояти ПЕРЕД словом
+# `send`, інакше argparse відмовляє. Значення True = прапорець зі значенням.
+GLOBAL = {"--port": True, "--baud": True, "--bits": True, "--parity": True,
+          "--stopbits": True, "--no-crtscts": False, "--dtr": False}
+
+HELP = """usage: send [options] FILE [FILE ...]
+       send --dnc [options] FILE
+
+Send NC program(s) to the Sinumerik. Wrapper around './sinumerik send'.
+
+It fills in what this control needs, unless you gave your own value.
+
+Loading into part program memory (default):
+  --gate 90     wait for START on the control before each file
+  --wait 0      do not wait for DC1 (this control never sends it)
+  --stall 1000  tolerate the control holding CTS down
+  --gcode       parse the file as an NC program
+                (skipped when you pass --trim-tail)
+
+--dnc  block transfer (BTR), executed straight off the wire:
+  --gate 300    5 min for BTR START -> NC START at the control
+  --wait 0      no DC1; the control opens the transfer by raising CTS
+  --first 90    90 s for the FIRST byte, then fail
+  --stall 0     after that, wait as long as it takes -- no timeout
+  --resume 0    same for XOn after XOff
+  --linger 15   keep listening after the last byte
+  --gcode       parse the file as an NC program
+
+--dnc is NOT passed on: there is no separate DNC format on the wire. The
+blocks are the same as for a memory load, '%MPF...' header included -- the
+control checks the program number against it (alarm 33). A pause after the
+first byte means the circular buffer is full and the machine is executing,
+so nothing there is allowed to time out.
+
+Everything else is passed through to './sinumerik send' unchanged --
+see './sinumerik send --help' for the full list.
+
+Run this FIRST, then press START on the control. Not the other way round.
+"""
+
+
+def has_opt(argv, name):
+    """Чи заданий прапорець, у формі `--x V` або `--x=V`."""
+    return name in argv or any(a.startswith(name + "=") for a in argv)
+
+
+def main():
+    argv = sys.argv[1:]
+
+    if not argv or "-h" in argv or "--help" in argv:
+        print(HELP, end="")
+        return 0 if argv else 2
+
+    if not os.access(TOOL, os.X_OK):
+        sys.exit(f"tool not found or not executable: {TOOL}")
+
+    out, glob = [], []
+    btr = False
+    skip = -1
+    for k, a in enumerate(argv):
+        if k == skip:
+            continue
+        if a == "--dnc":
+            btr = True
+            continue
+        base = a.split("=", 1)[0]
+        if base in GLOBAL:
+            glob.append(a)
+            if GLOBAL[base] and "=" not in a:      # значення окремим словом
+                if k + 1 >= len(argv):
+                    sys.exit(f"{a} needs a value")
+                glob.append(argv[k + 1])
+                skip = k + 1
+            continue
+        out.append(a)
+
+    # Режим розбору: --gcode лише коли не просили --trim-tail. В інструменті
+    # --gcode переважає --trim-tail, тож підставити його наосліп означало б
+    # зіпсувати заливку файлів відновлення.
+    if not has_opt(out, "--gcode") and not has_opt(out, "--trim-tail"):
+        out.insert(0, "--gcode")
+
+    if btr and has_opt(out, "--trim-tail"):
+        sys.exit("--dnc and --trim-tail make no sense together: recovery files "
+                 "are not part programs and cannot be executed off the wire")
+
+    for name, val in (BTR if btr else MEMORY).items():
+        if not has_opt(out, name):
+            out[:0] = [name, val]
+
+    cmd = [TOOL] + glob + ["send"] + out
+    print(("block transfer (BTR): the control executes straight off the wire\n"
+           if btr else "") + "+ " + " ".join(cmd), flush=True)
+    return subprocess.call(cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

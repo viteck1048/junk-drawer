@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""
+send — обгортка над `./maho432 send` цього каталогу.
+
+Навіщо вона тут. Заради однакової будови каталогів: у кожному верстаті два
+входи звуться однаково — `./send` і `./recv`, — і біля верстата не треба
+згадувати, у якого з них інструмент зветься `traub`, у якого `sinumerik`, а в
+якого `maho432`. Уся різниця живе всередині обгортки, а не в памʼяті оператора.
+
+Що підставляє:
+
+    --gate 120    чекати, поки стійка підніме CTS (у самому інструменті типово 0,
+                  тобто «шли одразу»)
+    --stall 1000  терпіти опущений CTS уже під час передачі
+
+**Обидва значення — здогад, не факт.** На верстаті ще нічого не пробувано.
+Розсуд такий:
+
+* `--gate` тут не лише про зручність. Якщо стійка не в прийомі, при апаратному
+  хендшейку ядро не випустить у лінію жодного байта й процес просто мовчки
+  стоятиме. Гейт натомість каже це словами й показує, чого саме чекає. Якщо ж
+  стійка тримає CTS піднятим постійно — гейт проходить одразу й нічому не
+  заважає. Кабель повний (8 сигнальних + земля), тож нуль на CTS однозначно
+  означає стан стійки.
+* `--stall` великий, бо опущений CTS посеред передачі — це стійка розбирає вже
+  прийняте, а не збій. Обірвати передачу по таймауту означає лишити у верстаті
+  півпрограми.
+
+Що НЕ підставляє: `--wait`/очікування DC1 тут нема взагалі. За цеховим профілем
+керування потоком апаратне, XOn/XOff не діють, і чекати запиту від стійки нема
+підстав. Якщо на верстаті виявиться інакше — це зміна в NOTES.md, а не прапорець
+нашвидкуруч.
+
+Свого значення не перебиває: якщо ти сам задав `--gate` чи `--stall`,
+лишається твоє.
+
+Перед запуском друкує повну команду — щоб було видно, що саме пішло на верстат.
+"""
+import os, subprocess, sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TOOL = os.path.join(HERE, "maho432")
+
+# Значення, які підставляємо, якщо користувач не задав свого.
+DEFAULTS = {"--gate": "120", "--stall": "1000"}
+# Прапорці самого інструмента, а не підкоманди: мусять стояти ПЕРЕД словом
+# `send`, інакше argparse відмовляє. Значення True = прапорець зі значенням.
+GLOBAL = {"--port": True, "--baud": True, "--bits": True, "--parity": True,
+          "--stopbits": True, "--no-crtscts": False, "--no-dtr": False}
+
+HELP = """usage: send [options] FILE [FILE ...]
+
+Send NC program(s) to the MAHO MH 600 C (Philips/MAHO CNC 432-9).
+Wrapper around './maho432 send'.
+
+NOTHING HERE HAS BEEN TRIED ON THE MACHINE YET. The line settings come from
+the shop's Windows DNC; see NOTES.md for what is fact and what is a guess.
+
+It fills in, unless you gave your own value:
+  --gate 120    wait for the control to raise CTS before each file
+                (first file on CTS=1, the rest on the CTS 1->0->1 edge)
+  --stall 1000  tolerate the control holding CTS down mid-transfer
+
+The file itself is parsed the way the shop DNC parses it, with no flags to
+remember: line endings become CRLF, NUL bytes are dropped, spaces are KEPT
+(unlike the Sinumerik directory, where they are stripped), and nothing is
+added before or after the file.
+
+Everything else is passed through to './maho432 send' unchanged --
+see './maho432 send --help' for the full list.
+
+Run this FIRST, then put the control into receive mode. Not the other way round.
+"""
+
+
+def has_opt(argv, name):
+    """Чи заданий прапорець, у формі `--x V` або `--x=V`."""
+    return name in argv or any(a.startswith(name + "=") for a in argv)
+
+
+def main():
+    argv = sys.argv[1:]
+
+    if not argv or "-h" in argv or "--help" in argv:
+        print(HELP, end="")
+        return 0 if argv else 2
+
+    if not os.access(TOOL, os.X_OK):
+        sys.exit(f"tool not found or not executable: {TOOL}")
+
+    out, glob = [], []
+    skip = -1
+    for k, a in enumerate(argv):
+        if k == skip:
+            continue
+        base = a.split("=", 1)[0]
+        if base in GLOBAL:
+            glob.append(a)
+            if GLOBAL[base] and "=" not in a:      # значення окремим словом
+                if k + 1 >= len(argv):
+                    sys.exit(f"{a} needs a value")
+                glob.append(argv[k + 1])
+                skip = k + 1
+            continue
+        out.append(a)
+
+    for name, val in DEFAULTS.items():
+        if not has_opt(out, name):
+            out[:0] = [name, val]
+
+    cmd = [TOOL] + glob + ["send"] + out
+    print("+ " + " ".join(cmd), flush=True)
+    return subprocess.call(cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

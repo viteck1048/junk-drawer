@@ -1,0 +1,8 @@
+port /dev/ttyUSB0 auto-detected  (USB  usb-FTDI_USB_Serial_Converter_FTCGYRQT-if00-port0)
+9600 7E1  crtscts=on  files: 1
+CIRCLES.NC: dnc: 18 blocks, source file has CRLF, stripped 74 spaces, leader 1 lines, header and comments 7 lines, EOT 0x04
+
+waiting for DC1, up to 30 s -- put the control into receive mode (Daten einlesen -> Start)
+  no DC1 arrived -- starting anyway (Sinumerik may simply wait silently)
+  8/311 B
+[1/1] CIRCLES.NC  sent 311 B in 0.4 s

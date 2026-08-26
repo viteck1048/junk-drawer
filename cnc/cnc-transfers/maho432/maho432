@@ -1,0 +1,922 @@
+#!/usr/bin/env python3
+"""
+maho432 — обмін УП з MAHO MH 600 C (Philips/MAHO CNC 432-9, fabr.nr. 76055)
+по RS232, 4800 7E1 + RTS/CTS.
+
+Двигун каталогу. Назовні його не викликають: на щодень є обгортки `./send` і
+`./recv`, і рівно вони — два єдині входи цього каталогу.
+
+Підкоманди:
+  ports              показати послідовні порти, які видно в системі
+  lines              показати стан модемних ліній (і --watch: лише зміни)
+  send  FILE [FILE]  залити програму(и) у верстат
+  recv  [FILE]       прийняти програму з верстата
+
+СТАН: на верстаті нічого з цього не пробувано. Усе, що тут зашито, зняте з
+налаштувань цехового CIMCO (`Setup: MAHO 600 C`, знімки 2026-08-12) і описане в
+NOTES.md. Протокол стійки нам поки невідомий, тож двигун навмисно не додає до
+файлу нічого свого і все чуте з лінії кладе на диск одразу — діагностика зараз
+важливіша за зручність.
+
+Що взято з цехового CIMCO:
+  * лінія 4800 7E1, керування потоком апаратне (RTS/CTS);
+  * DTR і RTS підняті ОБИДВА (Enable DTR ✓, Enable RTS ✓). На РВ-001 у тому ж
+    діалозі DTR знято, і `sinumerik` тримає його низьким — сюди цю звичку не
+    переносити;
+  * кінець кадру CRLF, довкола файлу не шлеться нічого: ні лідера, ні EOT,
+    ні DC-символів (усі чотири поля тригерів порожні);
+  * NUL із файлу викидаються, а пробіли — НЕ викидаються (Remove white spaces
+    знято). Цим передача сюди відрізняється від sinumerik --gcode;
+  * прийом кінчається по тиші: у цеху 5 с, бо кінцевого маркера там не задано.
+    Іншого критерію ми теж поки не маємо. Це найслабше місце — див. NOTES.md.
+
+Спільне з рештою каталогів лишається в силі: ixon/ixoff у ядрі НЕ вмикаємо,
+інакше воно зʼїсть саме ті DC1/DC3, які треба бачити.
+"""
+import argparse, datetime, fcntl, glob, os, re, select, struct, sys, termios, time
+
+# Шляхи — від самого файлу, а не від домівки: каталог верстата має працювати
+# з будь-якого місця, куди його скопіюють. realpath, щоб і виклик через симлінк
+# писав файли в репозиторій, а не поруч із симлінком.
+HERE = os.path.dirname(os.path.realpath(__file__))
+DEFAULT_OUTDIR = os.path.join(HERE, "tapes")
+DC1, DC3 = 0x11, 0x13
+TIOCMGET, TIOCMBIS, TIOCMBIC = 0x5415, 0x5416, 0x5417
+M_DTR, M_RTS, M_CTS, M_DSR, M_DCD = 0x002, 0x004, 0x020, 0x100, 0x040
+
+BAUD = {1200: termios.B1200, 2400: termios.B2400, 4800: termios.B4800,
+        9600: termios.B9600, 19200: termios.B19200, 38400: termios.B38400}
+
+
+# ---------------------------------------------------------------- порт
+# Порт шукаємо в системі, а не за моделлю перехідника. Біля верстата він буде
+# рідний (на матплаті) або з плати розширення; USB-перехідник — властивість
+# конкретного лаптопа, а не стека.
+#
+#   --port вказано        -> беремо його, нічого не шукаємо;
+#   знайдено рівно один   -> беремо мовчки;
+#   знайдено більше       -> ПОВНА ВІДМОВА зі списком портів.
+#
+# Відмова жорстка навмисно: за трьома портами одного PC стоять три різні
+# верстати, і «здогадався сам» там означає «програма поїхала не в той верстат».
+
+UART = {"1": "8250", "2": "16450", "3": "16550", "4": "16550A", "5": "Cirrus",
+        "6": "16650", "7": "16650V2", "8": "16750", "9": "StarTech",
+        "10": "16C950", "11": "16654", "12": "16850", "13": "RSA"}
+
+
+def _sysfs(dev, attr):
+    try:
+        with open(f"/sys/class/tty/{dev}/{attr}") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _by_id(node):
+    """Стабільне імʼя з /dev/serial/by-id, якщо для вузла таке є."""
+    for link in sorted(glob.glob("/dev/serial/by-id/*")):
+        if os.path.realpath(link) == node:
+            return os.path.basename(link)
+    return ""
+
+
+def _natkey(node):
+    """ttyS10 має йти після ttyS2, а не між ttyS1 і ttyS2."""
+    m = re.search(r"\d+$", node)
+    return (re.sub(r"\d+$", "", node), int(m.group()) if m else -1)
+
+
+def list_ports():
+    """[(вузол, опис)] — порти, за якими справді є залізо.
+
+    /dev/ttyS0..S3 ядро заводить завжди, навіть коли UART за ними нема.
+    Порожню заглушку видно по /sys/class/tty/ttySN/type == 0 (PORT_UNKNOWN).
+    Дивимось саме sysfs, а не ioctl, щоб не відкривати порт: відкритий порт
+    у цеху може бути чужим сеансом передачі, у який лізти не можна.
+    """
+    out = []
+    for node in sorted(glob.glob("/dev/ttyS*"), key=_natkey):
+        dev = os.path.basename(node)
+        t = _sysfs(dev, "type")
+        if not t or t == "0":
+            continue
+        where = os.path.basename(os.path.realpath(f"/sys/class/tty/{dev}/device"))
+        out.append((node, f"UART {UART.get(t, 'type ' + t)}  {where}"))
+    for node in sorted(glob.glob("/dev/ttyUSB*"), key=_natkey):
+        out.append((node, "USB  " + (_by_id(node) or "adapter")))
+    return out
+
+
+def _acm():
+    """CDC-ACM у рахунок не беремо: це й модем, і Arduino, і сканер відбитків.
+    Відрізнити звідси справжній перехідник RS232 від решти неможливо."""
+    return sorted(glob.glob("/dev/ttyACM*"), key=_natkey)
+
+
+def find_port(explicit=None):
+    if explicit:
+        if not os.path.exists(explicit):
+            sys.exit(f"no such port: {explicit}")
+        return explicit
+    ports = list_ports()
+    if not ports:
+        sys.exit("no serial port found.\n"
+                 "  empty ttyS0..3 do not count: no hardware behind them (type=0)"
+                 + (f"\n  found {' '.join(_acm())} (CDC-ACM); if that is the"
+                    " adapter, name it with --port" if _acm() else ""))
+    if len(ports) > 1:
+        sys.exit("more than one port -- name the one you need with --port:\n"
+                 + "\n".join(f"  {n:16s} {d}" for n, d in ports)
+                 + "\nWhich port belongs to which machine: write it into NOTES.md.")
+    print(f"port {ports[0][0]} auto-detected  ({ports[0][1]})")
+    return ports[0][0]
+
+
+def cmd_ports(args):
+    """Показати порти, нічого не відкриваючи."""
+    ports = list_ports()
+    for node, desc in ports:
+        print(f"  {node:16s} {desc}")
+    if not ports:
+        print("  no port with hardware behind it")
+    if _acm():
+        print("  ignored (CDC-ACM, usually not RS232): " + " ".join(_acm()))
+    return 0
+
+
+def open_port(path, baud, bits, parity, stopbits, crtscts, dtr=True):
+    """dtr типово True: у цеховому CIMCO для цього верстата Enable DTR ✓.
+
+    На РВ-001 у тому ж діалозі DTR знято, і там наш інструмент тримає його
+    низьким. Це різні верстати — не переносити.
+    """
+    fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    a = termios.tcgetattr(fd)
+    cflag = termios.CREAD | termios.CLOCAL | termios.HUPCL
+    cflag |= termios.CS8 if bits == 8 else termios.CS7
+    if parity == "even":
+        cflag |= termios.PARENB
+    elif parity == "odd":
+        cflag |= termios.PARENB | termios.PARODD
+    if stopbits == 2:
+        cflag |= termios.CSTOPB
+    if crtscts:
+        cflag |= termios.CRTSCTS
+    a[0] = 0          # без IXON/IXOFF: DC1/DC3 маємо бачити самі, а не втрачати в ядрі
+    a[1] = 0
+    a[2] = cflag
+    a[3] = 0
+    a[4] = a[5] = BAUD[baud]
+    a[6][termios.VMIN] = 0
+    a[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, a)
+    fcntl.ioctl(fd, TIOCMBIS, struct.pack("I", (M_DTR if dtr else 0) | M_RTS))
+    if not dtr:
+        fcntl.ioctl(fd, TIOCMBIC, struct.pack("I", M_DTR))
+    time.sleep(0.2)
+    termios.tcflush(fd, termios.TCIFLUSH)
+    return fd
+
+
+def modem(fd):
+    return struct.unpack("I", fcntl.ioctl(fd, TIOCMGET, struct.pack("I", 0)))[0]
+
+
+def lines_str(fd):
+    st = modem(fd)
+    return "  ".join(f"{n}={'1' if st & m else '0'}" for n, m in
+                     [("DTR", M_DTR), ("RTS", M_RTS), ("CTS", M_CTS),
+                      ("DSR", M_DSR), ("DCD", M_DCD)])
+
+
+def poll(fd, t):
+    r, _, _ = select.select([fd], [], [], t)
+    return os.read(fd, 4096) if r else b""
+
+
+def strip_parity(data):
+    return bytes(b & 0x7F for b in data)
+
+
+def parity_errors(data):
+    """Позиції байтів, у яких не збігається парна парність (лінія 7E1)."""
+    return [i for i, b in enumerate(data) if bin(b).count("1") % 2]
+
+
+def prog_number(text):
+    """Номер програми — окремим кадром другим рядком, одразу під '% PM'.
+
+    Формат цієї стійки (мануал 76.00181):  '% PM' / 'N9001' / далі G-код.
+    Тому шукаємо кадр, у якому НІЧОГО, крім N і цифр: 'N10 Z200 M30' під це
+    не підпадає й номером програми не стане.
+
+    `\\r` у класі символів обовʼязковий: рядки тут закінчуються CRLF, а `$`
+    у режимі MULTILINE стає перед `\\n`, тобто після `\\r`. Без нього шаблон
+    не збігається взагалі ніколи.
+    """
+    m = re.search(rb"^[ \t]*N(\d+)[ \t\r]*$", text[:400], re.M)
+    return m.group(1).decode() if m else None
+
+
+def prog_kind(text):
+    """'PM' (головна програма) чи 'MM' (підпрограма) — з преамбули.
+
+    Різниця між ними одна літера, а наслідок різний, тож двигун її називає
+    вголос: залити підпрограму замість програми (чи навпаки) з вигляду файлу
+    майже непомітно. Справжня преамбула -- '%PM' без пробілу; пробіл шаблон
+    усе ж допускає, бо в мануалі надруковано '% PM', і хтось неодмінно
+    набере файл саме так.
+    """
+    m = re.match(rb"[\x00\s]*%[ \t]*(PM|MM)", text[:64])
+    return m.group(1).decode() if m else None
+
+
+# ---------------------------------------------------------------- розбір файлу
+def to_text(data, eot=b"\x04"):
+    """Канонізує довільний текстовий файл у потік для стійки.
+
+    Робимо рівно те, що робить із файлом цеховий CIMCO для цього верстата, і
+    нічого понад те. Прапорців тут нема навмисно (README, принцип 9): формат
+    вхідного файлу визначається з самого файлу.
+
+      * роздільник рядків визначаємо самі: є CRLF -> ділимо по ньому, інакше
+        по LF, інакше по CR (файл із класичного Mac або зі стійки);
+      * кожен кадр завершуємо CRLF, включно з останнім: у цеху Transmit CR/LF
+        стоїть як \\13\\10;
+      * NUL викидаємо -- Remove ASCII 0's ✓;
+      * пробіли й табуляції ЗНІМАЄМО: у G-коді цієї стійки їх нема
+        (`N1G17T1M6`, `G22N9050`), ті, що в мануалі, розставив друкар.
+        Рішення Віктора. Галочка Remove white spaces у цеховому CIMCO знята,
+        але вона нічого не вирішує -- там просто нема чого знімати, бо файли
+        йдуть із постпроцесора вже без пробілів. У нас файл може прийти й від
+        людини з редактора, тож знімаємо самі;
+      * хвостові порожні рядки прибираємо, щоб кінцевий роздільник вихідного
+        файлу не перетворився на зайвий порожній кадр;
+      * у кінці ДОПИСУЄМО `0x04 CR LF` -- кінець запису й той самий CRLF, що
+        й наприкінці кожного кадру. Тобто хвіст файлу виглядає так:
+        `... N197 Z200 M30 CR LF  0x04 CR LF`.
+        Якщо 0x04 у вихідному файлі вже був, він знімається перед розбором і
+        ставиться канонічно, а не дублюється. Знімати обовʼязково: лишений у
+        тілі, він прилипає до кадру M30 і їде у верстат ПЕРЕД кінцем рядка;
+      * перед файлом не дописуємо нічого: усі поля тригерів у цеховому
+        профілі порожні.
+
+    Повертає (дані, звіт).
+    """
+    nul = data.count(0)
+    data = data.replace(b"\x00", b"")
+
+    had_eot = b""
+    if data.rstrip(b"\r\n")[-1:] in (b"\x04", b"\x1a"):
+        cut = data.rstrip(b"\r\n")
+        had_eot, data = cut[-1:], cut[:-1]
+
+    if b"\r\n" in data:
+        nl, sep = b"\r\n", "CRLF"
+    elif b"\n" in data:
+        nl, sep = b"\n", "LF"
+    else:
+        nl, sep = b"\r", "CR"
+    lines = [ln.replace(b"\r", b"").replace(b"\n", b"") for ln in data.split(nl)]
+    blanks = sum(ln.count(b" ") + ln.count(b"\t") for ln in lines)
+    lines = [ln.replace(b" ", b"").replace(b"\t", b"") for ln in lines]
+    while lines and not lines[-1]:
+        lines.pop()
+
+    out = b"".join(ln + b"\r\n" for ln in lines) + (eot + b"\r\n" if eot else b"")
+
+    # Керуючі символи, що лишились у тілі. Не чіпаємо (цеховий DNC їх теж не
+    # чіпає), але й не мовчимо: у 7-бітному каналі такий байт майже завжди
+    # означає, що файл прийшов не тим шляхом, яким думає оператор.
+    odd = sorted({b for ln in lines for b in ln if b < 32 and b != 9})
+    kind = prog_kind(out)
+    what = {"PM": "main program (% PM)", "MM": "SUBPROGRAM (% MM)"}.get(
+        kind, "no % PM / % MM preamble")
+    num = prog_number(out)
+    report = (f"file: {what}" + (f" N{num}" if num else "")
+              + f", {len(lines)} blocks, source has {sep}, sent as CRLF"
+              + (f", {nul} NUL removed" if nul else "")
+              + (f", {blanks} spaces stripped" if blanks else "")
+              + (f", ends with 0x{eot[0]:02x} CR LF"
+                 + (" (the file already had one)" if had_eot else "")
+                 if eot else ", NO end-of-record byte (--eot none)")
+              + (", control bytes kept: " + " ".join(f"0x{b:02x}" for b in odd)
+                 if odd else ""))
+    return out, report
+
+
+# ---------------------------------------------------------------- поступ
+SPIN = "|/-\\"
+PUSH_AFTER = 3.0        # с: після якої паузи вважаємо, що стійка чекає оператора
+
+
+def blinker(frame, on=">>>", off="   "):
+    return on if (frame // 5) % 2 else off
+
+
+def bar(name, i, total, t0, frame, stalled=False, stall_for=0.0, label="PUSH START"):
+    w, dt = 28, time.time() - t0
+    done = int(w * i / total) if total else 0
+    rate = i / dt if dt > 0.5 else 0
+    eta = (total - i) / rate if rate > 1 else 0
+    mark = "!" if stalled else SPIN[frame % len(SPIN)]
+    # Коли стійка відпустила CTS, показуємо ТРИВАЛІСТЬ паузи: очікуваний
+    # перепочинок між кадрами треба вміти відрізнити від мертвої лінії.
+    if stalled and stall_for >= PUSH_AFTER:
+        right = (f"{blinker(frame)} {label} {blinker(frame)}  "
+                 f"{int(stall_for // 60)}:{int(stall_for % 60):02d}")
+    elif stalled:
+        right = f"paused {stall_for:0.1f} s"
+    else:
+        right = f"{rate:4.0f} B/s  ~{int(eta // 60)}:{int(eta % 60):02d} left"
+    return (f"\r  {mark} {name:12.12s} [{'#' * done}{'.' * (w - done)}] "
+            f"{(100 * i // total) if total else 0:3d}%  {i:>7}/{total} B  "
+            f"{right}      ")
+
+
+def write_blocking(fd, piece, timeout, tick=None):
+    """Пише порцію. timeout <= 0 означає «чекати скільки треба».
+
+    Порт відкритий неблокуючим саме заради цього: при crtscts і низькому CTS
+    ядро просто не віддає дані в лінію, і звичайний os.write() висів би мовчки.
+    Так ми натомість бачимо, що саме відбувається, і показуємо це оператору.
+    """
+    sent = 0
+    deadline = time.time() + timeout if timeout > 0 else None
+    while sent < len(piece):
+        left = 0.1 if deadline is None else deadline - time.time()
+        if deadline is not None and left <= 0:
+            return sent
+        # Дрібними скибками, щоб анімація жила й поки стійка тримає CTS:
+        # саме тоді, коли здається, що воно зависло, і треба показати, що ні.
+        _, w, _ = select.select([], [fd], [], min(0.1, left))
+        if not w:
+            if tick:
+                tick(stalled=True)
+            continue
+        try:
+            sent += os.write(fd, piece[sent:])
+        except BlockingIOError:
+            pass
+    return sent
+
+
+# ---------------------------------------------------------------- lines
+def cmd_lines(args):
+    fd = open_port(find_port(args.port), args.baud, args.bits, args.parity,
+                   args.stopbits, not args.no_crtscts, not args.no_dtr)
+    if args.watch <= 0:
+        for _ in range(args.count):
+            print(lines_str(fd))
+            time.sleep(0.5)
+        os.close(fd)
+        return 0
+
+    # Спостереження: НІЧОГО не передаємо, лише читаємо стан ліній і те, що
+    # стійка скаже сама. Друкуємо тільки ЗМІНИ — рівні раз на пів секунди не
+    # показують коротких імпульсів, а натискання клавіш на стійці дають саме їх.
+    #
+    # Це головний інструмент для верстата, якого ми ще не бачили: на РВ-001
+    # саме так зʼясувалось, що CTS піднімається тієї секунди, коли оператор
+    # уводить стійку в режим прийому.
+    print(f"watching for {args.watch:.0f} s -- nothing is being sent.")
+    print("work the transfer keys on the control; every change is timestamped.")
+    print(f"  {datetime.datetime.now().strftime('%H:%M:%S')}   0.000 s   "
+          f"{lines_str(fd)}   (initial)")
+    t0 = time.time()
+    prev = modem(fd)
+    while time.time() - t0 < args.watch:
+        st = modem(fd)
+        if st != prev:
+            print(f"  {datetime.datetime.now().strftime('%H:%M:%S')}   "
+                  f"{time.time() - t0:7.3f} s   {lines_str(fd)}", flush=True)
+            prev = st
+        got = poll(fd, 0.0)
+        if got:
+            print(f"  {datetime.datetime.now().strftime('%H:%M:%S')}   "
+                  f"{time.time() - t0:7.3f} s   from the line: {got.hex(' ')}",
+                  flush=True)
+        time.sleep(0.02)
+    print(f"  {datetime.datetime.now().strftime('%H:%M:%S')}   "
+          f"{time.time() - t0:7.3f} s   {lines_str(fd)}   (end)")
+    os.close(fd)
+    return 0
+
+
+# ---------------------------------------------------------------- send
+def send_one(fd, path, args, gate, idx, total):
+    """Один файл у ВЖЕ ВІДКРИТИЙ порт.
+
+    Порт між файлами не закривається навмисно. Інакше на кожному стику
+    зʼявляється сліпий проміжок, і якщо оператор тисне старт одразу після кінця
+    передачі, стійка встигає і відпустити CTS, і підняти його знову, поки нас
+    на лінії нема. Гейт по переходу такий стик не бачить і потім вічно чекає
+    падіння, якого вже не буде.
+    """
+    name = os.path.basename(path)
+    data = open(path, "rb").read()
+
+    if not args.raw:
+        data, report = to_text(data, b"" if args.eot is None else bytes([args.eot]))
+        print(f"{name}: {report}", flush=True)
+    else:
+        # --raw означає «байт у байт»: ні пробілів не чіпаємо, ні кінця запису
+        # не дописуємо. Для експериментів, коли треба відтворити щось точно.
+        print(f"{name}: {len(data)} B sent byte for byte (--raw)", flush=True)
+
+    hi = [i for i, b in enumerate(data) if b > 127]
+    if hi and args.bits == 7:
+        print(f"REFUSED: {len(hi)} bytes >127 (first at {hi[0]}) -- the channel is 7-bit.\n"
+              "Looks like the file was edited outside ASCII.")
+        return 1
+
+    if gate:
+        # Гейт по ПЕРЕХОДУ CTS 1->0->1 для кожного файлу, крім першого.
+        # По рівню не можна: 2026-08-04 на РВ-001 рівень пропустив три файли
+        # підряд за 23 с без жодної дії оператора. Перехід помиляється в бік
+        # простою -- не дочекавшись, він просто стоїть.
+        deadline = time.time() + args.gate
+        fr, t_gate, said = [0], time.time(), [0.0]
+
+        def spin(phase, push=False):
+            fr[0] += 1
+            el = time.time() - t_gate
+            if sys.stdout.isatty():
+                tail = (f"  {blinker(fr[0])} PUSH START {blinker(fr[0])}" if push else "")
+                sys.stdout.write(f"\r  {SPIN[fr[0] % len(SPIN)]} {phase}"
+                                 f"  {int(el // 60)}:{int(el % 60):02d}{tail}      ")
+                sys.stdout.flush()
+            elif time.time() - said[0] >= 5.0:          # вивід у файл
+                said[0] = time.time()
+                print(f"  {'>>> PUSH START -- ' if push else ''}{phase}"
+                      f"  {int(el // 60)}:{int(el % 60):02d}", flush=True)
+
+        if gate == "edge":
+            while modem(fd) & M_CTS:
+                if time.time() > deadline:
+                    print("\nCTS never dropped: the control did not leave the previous transfer")
+                    return 1
+                spin("waiting for the previous file to finish (CTS 1->0)")
+                time.sleep(0.15)
+        while not modem(fd) & M_CTS:
+            if time.time() > deadline:
+                # Кабель тут повний (8 сигнальних + земля, паяний Віктором), тож
+                # нуль на CTS -- це стан СТІЙКИ, а не брак дроту. Не пропонувати
+                # оператору шукати проблему в кабелі.
+                print(f"\n{name}: CTS never rose -- the control is not in receive mode.\n"
+                      "  The cable carries the modem lines, so this is the control's\n"
+                      "  own state. Check the transfer mode on the control itself.")
+                return 1
+            spin(f"{name}: control ready to receive", push=True)
+            time.sleep(0.15)
+        if sys.stdout.isatty():
+            sys.stdout.write("\r" + " " * 78 + "\r")
+
+    if not args.no_crtscts and not modem(fd) & M_CTS:
+        print("\n!! CTS=0 while crtscts is on -- the kernel will not let a single byte out.\n"
+              "   The machine is not in receive mode yet.", flush=True)
+
+    heard = bytearray()
+    t_line = time.time()
+    hpath = [None]
+
+    def note(got, where):
+        """Усе почуте з лінії — на диск ОДРАЗУ, і з відміткою часу.
+
+        2026-08-07 на РВ-001 обірваний процес забрав із собою весь журнал лінії,
+        бо той жив лише в памʼяті й писався в кінці. Тут файл відкривається на
+        першому ж почутому байті й дописується на місці.
+
+        Для цього верстата це ще важливіше: ми не знаємо, чи він узагалі щось
+        каже у відповідь, і кожен почутий байт — це факт, якого в нас нема.
+        """
+        if not got:
+            return
+        heard.extend(got)
+        if hpath[0] is None:
+            os.makedirs(args.logdir, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            hpath[0] = os.path.join(args.logdir, f"send_{ts}.heard")
+        with open(hpath[0], "ab") as f:
+            f.write(got)
+        print(f"  [{time.time() - t_line:7.2f} s] from the line at {where} B: "
+              f"{got.hex(' ')}", flush=True)
+
+    i = paused = 0
+    t0 = time.time()
+    stall = None
+    anim = sys.stdout.isatty()
+    frame, last, since = [0], [0.0], [None]
+
+    def label():
+        # Пауза до першого байта і пауза посеред передачі означають різне:
+        # до першого — стійка ще не в прийомі, від оператора чекають старт.
+        return "PUSH START" if i == 0 else "CONTROL BUSY"
+
+    def draw(stalled=False):
+        if not stalled:
+            since[0] = None
+        elif since[0] is None:
+            since[0] = time.time()
+        now = time.time()
+        held = now - since[0] if since[0] else 0.0
+        if not anim:
+            # Вивід у файл: анімації нема, тож нагадування друкуємо рядками.
+            if stalled and held >= PUSH_AFTER and now - last[0] >= 5.0:
+                last[0] = now
+                print(f"  >>> {label()} -- {name} stopped at {i}/{len(data)} B, "
+                      f"paused {int(held // 60)}:{int(held % 60):02d}", flush=True)
+            return
+        if now - last[0] < 0.1:
+            return
+        last[0] = now
+        frame[0] += 1
+        sys.stdout.write(bar(name, i, len(data), t0, frame[0], stalled, held, label()))
+        sys.stdout.flush()
+
+    pieces = [data[k:k + args.chunk] for k in range(0, len(data), args.chunk)]
+    pi = 0
+    while i < len(data):
+        piece = pieces[pi]
+        pi += 1
+        draw()
+        # Два різні очікування, і плутати їх не можна.
+        #
+        # ПЕРШИЙ байт: лінія ще не довела, що працює. Якщо стійка не бере його
+        # за --first секунд, вона просто не в прийомі, і чекати далі нема сенсу.
+        #
+        # ПІСЛЯ першого байта: опущений CTS означає, що стійка розбирає вже
+        # прийняте. Скільки саме — залежить від неї, тож --stall тримається
+        # великим; 0 означає «чекати скільки треба».
+        limit = args.first if i == 0 else args.stall
+        n = write_blocking(fd, piece, limit, tick=draw)
+        if n < len(piece):
+            where = "first byte" if i == 0 else f"{i + n}/{len(data)} B"
+            stall = f"line did not take the {where} in {limit:.0f} s.  {lines_str(fd)}"
+            i += n
+            break
+        termios.tcdrain(fd)                    # тримаємо реальний темп лінії
+        i += n
+
+        got = poll(fd, 0.0)
+        note(got, i)
+        while DC3 in got:
+            # За цеховим профілем керування потоком тут апаратне, тож XOff бути
+            # не мало б. Але якщо він таки прийшов — це факт про стійку, а не
+            # шум, і зігнорувати його означає переповнити її буфер. Тому
+            # спиняємось і кажемо про це вголос.
+            paused += 1
+            t_off = time.time()
+            print(f"\n  !! XOff (DC3) at {i}/{len(data)} B -- the shop profile says "
+                  "hardware handshake, so this was NOT expected.\n"
+                  "     Stopping until XOn. Write this down in NOTES.md.", flush=True)
+            rd = t_off + args.resume if args.resume > 0 else None
+            said = t_off
+            while True:
+                g2 = poll(fd, 0.5)
+                note(g2, i)
+                if DC1 in g2:
+                    print(f"  XOn after {time.time() - t_off:.1f} s -- resuming at {i} B",
+                          flush=True)
+                    got = b""
+                    break
+                if rd is not None and time.time() > rd:
+                    stall = (f"no XOn after XOff at {i}/{len(data)} B: waited "
+                             f"{args.resume:.0f} s.  {lines_str(fd)}")
+                    got = b""
+                    break
+                if time.time() - said >= 10.0:
+                    said = time.time()
+                    print(f"    still stopped, {time.time() - t_off:.0f} s"
+                          f"  {lines_str(fd)}", flush=True)
+            if stall:
+                break
+        if stall:
+            break
+        if anim:
+            draw()
+        elif args.progress and i % 400 < args.chunk:
+            print(f"  {i}/{len(data)} B", flush=True)
+
+    termios.tcdrain(fd)
+    if anim:
+        sys.stdout.write("\r" + " " * 96 + "\r")     # смужку прибираємо
+    dt = time.time() - t0
+    if stall:
+        print(f"{name}: FAILED -- {stall}", flush=True)
+    else:
+        print(f"[{idx}/{total}] {name}  sent {i} B in {dt:.1f} s"
+              + (f", XOff pauses: {paused}" if paused else ""), flush=True)
+
+    # Жодних пауз після кінця файлу: оператор тисне старт одразу, і кожна
+    # секунда тут — це секунда, у яку ми не бачимо лінії й можемо проґавити
+    # перехід CTS. --linger типово 0; вмикати лише для діагностики.
+    if args.linger > 0:
+        note(poll(fd, args.linger), i)
+
+    if heard:
+        print(f"\nheard from the line ({len(heard)} B): {hpath[0]}")
+        txt = strip_parity(bytes(heard))
+        printable = sum(1 for b in txt if 32 <= b < 127 or b in (10, 13))
+        if printable > len(txt) // 2:
+            print("  as text:", txt.decode("ascii", "replace"))
+    return 1 if stall else 0
+
+
+def cmd_send(args):
+    """Уся послідовність в одному процесі, порт відкритий наскрізь."""
+    port = find_port(args.port)
+    crtscts = not args.no_crtscts
+    fd = open_port(port, args.baud, args.bits, args.parity, args.stopbits,
+                   crtscts, not args.no_dtr)
+    par = {"even": "E", "odd": "O", "none": "N"}[args.parity]
+    print(f"{args.baud} {args.bits}{par}{args.stopbits}  "
+          f"crtscts={'on' if crtscts else 'off'}  "
+          f"DTR={'up' if not args.no_dtr else 'down'}  files: {len(args.file)}",
+          flush=True)
+    print(lines_str(fd), flush=True)
+
+    rc = 0
+    total = len(args.file)
+    for idx, path in enumerate(args.file, 1):
+        if args.gate <= 0:
+            gate = None
+        elif idx == 1:
+            gate = "level"          # падати ще нема чому
+        else:
+            gate = "edge"           # 1->0->1: справжній старт на стійці
+        rc = send_one(fd, path, args, gate, idx, total)
+        if rc:
+            print(f"\nstopping at {os.path.basename(path)}, not going further")
+            break
+
+    os.close(fd)
+    return rc
+
+
+# ---------------------------------------------------------------- recv
+def cmd_recv(args):
+    # FILE і -o кажуть те саме різними словами. Мовчки вибрати один означало б
+    # покласти програму не туди, куди чекає оператор.
+    if args.file and args.outdir != DEFAULT_OUTDIR:
+        sys.exit("FILE and -o say the same thing -- give one of them, not both")
+    # Перевіряємо ДО відкриття порту. Інакше верстат віддасть усю програму, а
+    # оператор дізнається, що писати нікуди, аж коли передача вже позаду.
+    if args.file:
+        for p in (os.path.abspath(args.file), os.path.abspath(args.file) + ".raw"):
+            if os.path.exists(p):
+                sys.exit(f"refusing to overwrite an existing file: {p}")
+
+    port = find_port(args.port)
+    # Приймаємо в сирому 8N1: біт парності приходить як 8-й біт даних, і ми
+    # рахуємо його самі. Якби парність вмикали в ядрі, збійний байт підмінявся б
+    # на 0x00 і став невідрізненним від справжнього NUL (README, принцип 1).
+    # crtscts на прийомі не потрібен -- він обмежує лише НАШУ передачу.
+    fd = open_port(port, args.baud, 8, "none", 1, False, not args.no_dtr)
+    print(f"port {port}, {args.baud} 8N1 raw (parity checked in software)")
+    print(lines_str(fd))
+    print(f"waiting for data (up to {args.wait:.0f} s)"
+          + (", sending DC1 every 2 s" if args.dc1 else "")
+          + " -- start the output on the control", flush=True)
+
+    buf = bytearray()
+    t_start = time.time()
+    deadline = t_start + args.wait
+    next_dc1 = 0.0
+    prev = modem(fd)
+    t_last = None          # коли прийшов попередній шматок
+    gap_max, gap_at = 0.0, 0
+    reason = "timed out waiting for data"
+
+    try:
+        while True:
+            # Типово не шлемо нічого: у цеховому профілі Send XOn знято.
+            # --dc1 лишається на випадок, якщо стійка все ж чекає запиту.
+            if args.dc1 and not buf and time.time() >= next_dc1:
+                os.write(fd, bytes([DC1]))
+                next_dc1 = time.time() + 2.0
+            chunk = poll(fd, 0.25)
+            if chunk:
+                now = time.time()
+                if not buf:
+                    print(f"[{now - t_start:6.1f}s] data started", flush=True)
+                elif now - t_last > gap_max:
+                    gap_max, gap_at = now - t_last, len(buf)
+                t_last = now
+                buf += chunk
+                deadline = now + args.idle
+                reason = f"line idle for {args.idle:.1f} s"
+                continue
+            st = modem(fd)
+            if st != prev:                    # фіксуємо, коли ЧПК рухає лініями
+                print(f"[{time.time() - t_start:6.1f}s] {lines_str(fd)} "
+                      f"(bytes={len(buf)})", flush=True)
+                prev = st
+            if time.time() > deadline:
+                break
+    finally:
+        os.close(fd)
+
+    print(f"\nend: {reason}")
+    print(f"received: {len(buf)} B in {time.time() - t_start:.1f} s")
+    if not buf:
+        print("nothing arrived")
+        return 1
+
+    # Найдовша пауза всередині передачі проти нашого --idle. Якщо перша
+    # наближається до другого, наступний прийом обірветься посеред програми —
+    # і саме так це виглядатиме як успіх. Кінець по тиші тут тимчасовий:
+    # справжнього сигналу кінця передачі ми для цієї стійки ще не знаємо.
+    margin = "" if gap_max < args.idle * 0.5 else "   <-- close to --idle, RAISE IT"
+    print(f"longest gap inside the data: {gap_max:.2f} s at byte {gap_at} "
+          f"(--idle is {args.idle:.2f} s){margin}")
+
+    bad = parity_errors(buf)
+    print(f"parity errors: {len(bad)}" + (f"  at {bad[:10]}" if bad else "  none"))
+
+    data = strip_parity(bytes(buf))
+    lead = len(data) - len(data.lstrip(b"\x00"))
+    tail = len(data) - len(data.rstrip(b"\x00"))
+    data = data.strip(b"\x00")
+    if lead or tail:
+        print(f"NUL: leader {lead} B, trailer {tail} B (kept in the .raw, dropped here)")
+    inner = data.count(0)
+    if inner:
+        print(f"WARNING: {inner} NUL bytes inside the body -- not a leader, so "
+              "either a line glitch or the wrong format. Removed here, kept in "
+              "the .raw; check the file before sending it back.")
+        data = data.replace(b"\x00", b"")
+
+    # Кінець запису (0x04) знімаємо ДО розбору на кадри й повертаємо останнім
+    # байтом — так само, як на передачі. Інакше він прилипає до кадру M30, і
+    # прийнятий файл уже не можна віддати назад без правки руками.
+    eot = b""
+    if data.rstrip(b"\r\n ")[-1:] in (b"\x04", b"\x1a"):
+        cut = data.rstrip(b"\r\n ")
+        eot, data = cut[-1:], cut[:-1]
+        print(f"end-of-record byte 0x{eot[0]:02x} seen -- kept as the last byte")
+
+    # Кінці рядків. Який саме зліпок CR/LF шле ця стійка — ми не знаємо (у цеху
+    # стоїть CR/LF: Auto, а Remove characters: All below ASCII 32 стирає всі
+    # докази). Тому будь-який зліпок рахуємо за один розділювач кадрів і зводимо
+    # до CRLF. Оригінал лишається в .raw — саме там і читати правду про формат.
+    blocks = [b for b in re.split(rb"[\r\n]+", data) if b]
+    text = (b"\r\n".join(blocks) + b"\r\n" if blocks else b"") + eot
+    print(f"line endings normalised to CRLF, {len(blocks)} blocks")
+
+    # Керуючі символи, що лишились у тілі (крім TAB). Не викидаємо: якщо це
+    # маркер кінця передачі або частина заголовка, то саме він нам і потрібен —
+    # формат цієї стійки ще не зʼясований. Але й не мовчимо: цеховий DNC такий
+    # байт стер би (Remove characters: All below ASCII 32), а ми хочемо його
+    # побачити. Позиції — щоб було де шукати в .raw.
+    kind = prog_kind(text)
+    num = prog_number(text)
+    print("received: "
+          + {"PM": "main program (% PM)", "MM": "SUBPROGRAM (% MM)"}.get(
+              kind, "no % PM / % MM preamble -- is this a program at all?")
+          + (f", N{num}" if num else ", no program number found"))
+    if kind == "MM" and not eot:
+        # У підпрограми нема M17 -- 0x04 єдине, що позначає її кінець.
+        print("WARNING: a subprogram with no 0x04 at the end. There is no M17 "
+              "here, so nothing else marks where it stops -- the receive most "
+              "likely got cut short. Check the .raw.")
+
+    body = text[:-1] if eot else text          # кінцевий 0x04 уже пояснено вище
+    odd = [(i, b) for i, b in enumerate(body) if (b < 32 and b not in (9, 13, 10)) or b == 127]
+    if odd:
+        print("control bytes left in the body (kept on purpose, look them up in "
+              "the .raw): "
+              + " ".join(f"0x{b:02x}@{i}" for i, b in odd[:10])
+              + (f" ... {len(odd)} total" if len(odd) > 10 else ""))
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.file:
+        # Названий файл: текст рівно туди, куди сказали, архів поруч. Суфікс
+        # додається, а не заміняє розширення, — щоб `x.nc` і `x.txt` не дали
+        # одного й того ж `x.raw`.
+        txt_p = os.path.abspath(args.file)
+        os.makedirs(os.path.dirname(txt_p) or ".", exist_ok=True)
+    else:
+        # Без імені — кладемо в tapes/ під номером програми: він стоїть окремим
+        # кадром одразу під преамбулою. Не знайшли — по даті, а не вгадуємо.
+        # Тип у імені не дублюємо: номери PM і MM з одного адресного простору.
+        os.makedirs(args.outdir, exist_ok=True)
+        num = prog_number(text)
+        base = f"N{num}" if num else "prog"
+        txt_p = os.path.join(args.outdir, f"{base}_{ts}_{len(text)}B.nc")
+    raw_p = txt_p + ".raw"
+    # Обидва файли пишемо завжди: .raw — байт-точний архів із бітами парності,
+    # .nc — текст для людини. Одного .nc мало: коли парність не збіглась або
+    # формат виявиться не тим, звіряти вже немає з чим.
+    open(raw_p, "wb").write(bytes(buf))
+    open(txt_p, "wb").write(text)
+    print(f"\nraw dump : {raw_p}   ({len(buf)} B, as it came off the wire)")
+    print(f"text     : {txt_p}   ({len(text)} B)")
+
+    if bad:
+        print("!! parity check failed -- do NOT send this file back to the machine")
+        return 2
+    rows = text.decode("ascii", "replace").replace("\r\n", "\n").split("\n")
+    print(f"\nfirst lines: {rows[:4]}")
+    print(f"last       : {[r for r in rows if r][-4:]}")
+    return 0
+
+
+def eot_arg(s):
+    return None if s.lower() in ("no", "none", "") else int(s, 0)
+
+
+def main():
+    p = argparse.ArgumentParser(
+        prog="maho432",
+        description="NC program transfer with the MAHO MH 600 C (Philips/MAHO "
+                    "CNC 432-9) over RS232. Nothing here has been tried on the "
+                    "machine yet -- the settings come from the shop's Windows "
+                    "DNC; see NOTES.md")
+    p.add_argument("--port", help="port node, e.g. /dev/ttyS0; without it the port is "
+                                  "auto-detected, but only if there is exactly one")
+    p.add_argument("--baud", type=int, default=4800, choices=sorted(BAUD))
+    p.add_argument("--bits", type=int, default=7, choices=(7, 8))
+    p.add_argument("--parity", default="even", choices=("even", "odd", "none"))
+    p.add_argument("--stopbits", type=int, default=1, choices=(1, 2))
+    p.add_argument("--no-crtscts", action="store_true",
+                   help="turn the hardware handshake off (the shop DNC has it on)")
+    p.add_argument("--no-dtr", action="store_true",
+                   help="keep DTR down. The shop DNC raises it for this machine "
+                        "(Enable DTR is ticked), so by default we raise it too")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("ports", help="list the serial ports visible in the system")
+    s.set_defaults(fn=cmd_ports)
+
+    s = sub.add_parser("lines", help="show modem line state")
+    s.add_argument("-n", "--count", type=int, default=6)
+    s.add_argument("--watch", type=float, default=0.0,
+                   help="watch the lines for N seconds and print only the "
+                        "CHANGES, timestamped, plus anything the control says. "
+                        "Sends nothing -- use it to find out what the transfer "
+                        "keys on the control actually do to the line")
+    s.set_defaults(fn=cmd_lines)
+
+    s = sub.add_parser("send", help="send file(s) to the machine")
+    s.add_argument("file", nargs="+",
+                   help="one or more files; the port stays open across all of them")
+    s.add_argument("--raw", action="store_true",
+                   help="send the file byte for byte, no line-ending work at all. "
+                        "For experiments only -- normally the file is parsed the "
+                        "way the shop DNC parses it (CRLF, NUL dropped, spaces kept)")
+    s.add_argument("--gate", type=float, default=0.0,
+                   help="wait for START on the control before each file, s "
+                        "(first file on CTS=1, the rest on the CTS 1->0->1 edge)")
+    s.add_argument("--first", type=float, default=90.0,
+                   help="how long to wait for the line to take the FIRST byte, s "
+                        "(0 = forever). Until it does, nothing proves the control "
+                        "is in receive mode at all, so this one does time out")
+    s.add_argument("--stall", type=float, default=0.0,
+                   help="how long to tolerate the line not taking a byte AFTER "
+                        "the first one went through, s. 0 (default) = as long as "
+                        "it takes: a held CTS is the control working, not a fault")
+    s.add_argument("--resume", type=float, default=120.0,
+                   help="how long to wait for XOn after an unexpected XOff, s")
+    s.add_argument("--eot", type=eot_arg, default=0x04,
+                   help="end-of-record byte written after the last block, "
+                        "followed by CR LF. Default 0x04, which is what this "
+                        "control's own programs end with. 'none' to write no "
+                        "such byte at all")
+    s.add_argument("--linger", type=float, default=0.0,
+                   help="how long to listen for a reply after the end, s")
+    s.add_argument("--chunk", type=int, default=16)
+    s.add_argument("--logdir", default=DEFAULT_OUTDIR)
+    s.add_argument("--progress", action="store_true", default=True)
+    s.set_defaults(fn=cmd_send)
+
+    s = sub.add_parser("recv", help="receive a program from the machine")
+    s.add_argument("file", nargs="?",
+                   help="output text file; the byte-exact archive goes next to it "
+                        "as FILE.raw. Without it: tapes/prog_<date>.nc")
+    s.add_argument("-o", "--outdir", default=DEFAULT_OUTDIR)
+    s.add_argument("--wait", type=float, default=600.0,
+                   help="how long to wait for the first byte, s")
+    s.add_argument("--idle", type=float, default=5.0,
+                   help="silence means end of data, s. 5 s is what the shop DNC "
+                        "uses, and silence is the only end-of-transfer criterion "
+                        "we have for this control so far")
+    s.add_argument("--dc1", action="store_true",
+                   help="send DC1 every 2 s while waiting. Off by default: the "
+                        "shop DNC has 'Send XOn' unticked and sends nothing")
+    s.set_defaults(fn=cmd_recv)
+
+    args = p.parse_args()
+    # Ctrl-C — штатний спосіб вийти з `lines --watch` і з очікування в recv.
+    # Без цього оператор біля верстата бачить пітонівський traceback і має
+    # вирішити, чи він щось зламав. 130 — звичний код виходу для SIGINT.
+    try:
+        sys.exit(args.fn(args) or 0)
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+        sys.exit(130)
+
+
+if __name__ == "__main__":
+    main()

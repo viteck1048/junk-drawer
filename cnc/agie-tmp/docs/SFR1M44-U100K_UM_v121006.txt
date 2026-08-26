@@ -1,0 +1,102 @@
+SFR1M44-U100K SFR1M44-TU100K SFR1M44-U100K-R                                          GOTEK system
+
+
+
+                                        User manual
+                              Floppy to USB emulator
+Model:
+SFR1M44-U100K code*U00
+SFR1M44-U100K-R codeU01
+SFR1M44-TU100K codeU02
+
+Floppy driver with below function needed:
+     Floppy driver with 34pin interface, and 5V DC power plug (example: SONY YE-DATA
+     ALPS TEAC EPSON PANASONIC NEC )
+     Use 2HD flpppy disk with 1.44MB capacity
+     Format of disk : Cylinders: 80   Tracks: 160 Sectors/Track: 18 Bytes/Sector: 512 Data
+     transfer rate: 500 kbps Encoding method: MFM.
+
+Features:
+     Use normal usb flash drive as the medium for transfer design.
+     34pin floppy driver interface, 5V DC power supply, easy to install.
+     Capacity: 1.44MB 2HD Cylinders: 80 Tracks: 160 Sectors/Track: 18 Bytes/Sector: 512 Data
+     transfer rate: 500 kbps Encoding method: MFM.
+     1000pcs partitions in usb flash drive can be used.
+     Built-in self-format function. (read relevant documents to use this function)
+     Jumpers with function for different machines(SFR1M44-U100K not support jumpers).
+
+Panel:
+
+
+
+
+8segment numbers: represent partitions number
+Green led: status of read and write operation
+USB port: connect usb flash drive
+Button:
+Left button used to rise ten-digit, right botton used to rise single-digit, press 2 button together to
+rise hundred-digit.
+
+Operation :
+     Format usb flash drive.
+1. use built-in self-format function to format usb flash drive into 1000pcs partitions.
+
+
+                                                                                        Version 121006
+SFR1M44-U100K SFR1M44-TU100K SFR1M44-U100K-R                                  GOTEK system
+
+
+2. use software in CD format usb flash drive under WINDOWS XP/2000, into 000-099 100pcs
+   partitions.
+3. install an emulator on computer, and format every partitions by operate driver A:.
+4. use emulator UFA1M44-100, plug usb flash drive on it, connect to computer, it will
+   recognized as removabe driver A: or B: under WINDOWS XP/2000/7, format every partitions.
+   UFA1M44-100 also built in self-format function.
+    Read and write data.
+1. install emulator on machine
+2. install emulator on computer
+3. connect usb flash drive on computer, read and write data directory by software, under
+   WINDOWS XP/2000
+4. use emulator UFA1M44-100, plug usb flash drive on it, connect to computer, read and write
+   data under WINDOWS XP/2000/7.
+
+Jumper setting(SFR1M44-TU100K SFR1M44-U100K-R)
+J5---
+JAset to generete READY signal on 34pin of floppy driver interface
+JC---
+JB---
+S0Driver select 0
+S1Driver select 1
+MOMotor
+
+Jumper setting(SFR1M44-U100K)
+J5---
+JA---
+JC---
+JB---
+S0Driver select 0
+S1Driver select 1
+MOMotor
+
+
+
+
+                                                                               Version 121006
+SFR1M44-U100K SFR1M44-TU100K SFR1M44-U100K-R                                    GOTEK system
+
+
+
+
+Firmware version of emulator
+Keep pressed 2 button together , power on , 8segment numbers will display firmware version and
+data of emulator to detect different model.
+
+Error code
+E0no specified file in usb flash drive
+E16built-in memory fault
+
+
+
+
+                                                                                 Version 121006
+

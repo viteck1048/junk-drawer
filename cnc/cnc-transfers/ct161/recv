@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""
+recv — прийом програми зі СТ-161 NC у файл. Обгортка над `sniff` цього каталогу.
+
+СТАН: **не перевірено на верстаті.** До СТ-161 ми ще не доходили — у каталозі
+досі був лише `sniff`. Усе нижче побудоване на тому, що записано в `NOTES.md`
+цього каталогу (лінія 4800 7E2, апаратний хендшейк), а не на побаченому в цеху.
+Перший же реальний прийом або підтвердить це, або покаже інше — тоді правити
+треба тут, а не в `sniff`.
+
+Поділ обовʼязків:
+  sniff — слухає лінію й повертає сирі байти. Нічого не пише на диск.
+  recv  — знімає біт парності: 7E2 означає сім біт даних плюс парність, тобто
+          восьмий біт — не дані. Другий стоп-біт на прийомі ролі не грає.
+
+Якщо після першого прийому виявиться, що лінія не 7E2, `recv` скаже про це
+попередженням: у парній парності кожен байт має парну кількість одиниць.
+"""
+import argparse, datetime, os, re, sys
+from importlib.machinery import SourceFileLoader
+import importlib.util
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def load_sniff():
+    """Підвантажити сусідній `sniff` як модуль.
+
+    Файл без розширення .py, тож потрібен явний loader. Шлях — від
+    realpath(__file__): каталог верстата самодостатній, з системи нічого.
+    """
+    path = os.path.join(HERE, "sniff")
+    if not os.path.exists(path):
+        sys.exit("sniff not found next to this script: " + path)
+    spec = importlib.util.spec_from_file_location(
+        "sniff", path, loader=SourceFileLoader("sniff", path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def main():
+    sniff = load_sniff()
+
+    p = argparse.ArgumentParser(
+        prog="recv",
+        description="receive a program from the CT-161 into a file "
+                    "(7E2 per NOTES.md: the parity bit is stripped). "
+                    "NOT yet tried on the real machine")
+    p.add_argument("file", nargs="?",
+                   help="output file; without it: <date>_<size>B.nc "
+                        "in the current directory")
+    p.add_argument("--port", help="port node, e.g. /dev/ttyS0; without it the port is "
+                                  "auto-detected, but only if there is exactly one")
+    p.add_argument("-b", "--baud", type=int, default=sniff.DEFAULT_BAUD)
+    p.add_argument("--wait", type=float, default=600.0,
+                   help="how long to wait for the first byte, s")
+    p.add_argument("--idle", type=float, default=sniff.DEFAULT_IDLE,
+                   help="silence means end of data, s")
+    p.add_argument("--dc1", action="store_true",
+                   help="send DC1 every 2 s (for XON/XOFF controls; unknown for this one)")
+    args = p.parse_args()
+
+    raw = sniff.capture(port=args.port, baud=args.baud,
+                        wait=args.wait, idle=args.idle, dc1=args.dc1)
+    if not raw:
+        return 1
+
+    # 7E2: восьмий біт — парність, не дані.
+    data = bytes(b & 0x7F for b in raw)
+
+    odd = sum(1 for b in raw if bin(b).count("1") % 2)
+    if odd:
+        print(f"WARNING: {odd}/{len(raw)} bytes do not have even parity -- "
+              "the line is not 7E2 as NOTES.md assumes. Check the baud rate and the "
+              "format with ./sniff; the file is written anyway.")
+
+    # На виході текстовий .nc, який відкривають редактором, а не дамп трафіку.
+    lead = len(data) - len(data.lstrip(b"\x00"))
+    tail = len(data) - len(data.rstrip(b"\x00"))
+    data = data.strip(b"\x00")
+    if lead or tail:
+        print(f"stripped NUL: leader {lead} B, trailer {tail} B")
+
+    inner = data.count(0)
+    if inner:
+        print(f"WARNING: {inner} NUL bytes inside the program body -- "
+              "not a leader, so either a line glitch or the wrong format. "
+              "Removed; check the file before sending it back.")
+        data = data.replace(b"\x00", b"")
+
+    # Кінці рядків зводимо до CRLF: .nc відкривають редактором. Що саме
+    # віддає СТ-161, ми не бачили — після першого прийому звірити з NOTES.md.
+    blocks = [b for b in re.split(rb"[\r\n]+", data) if b]
+    data = b"\r\n".join(blocks) + b"\r\n" if blocks else b""
+    print(f"line endings normalised to CRLF, {len(blocks)} blocks")
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = args.file or f"{ts}_{len(data)}B.nc"
+    path = os.path.abspath(path)
+    if os.path.exists(path):
+        sys.exit(f"refusing to overwrite an existing file: {path}")
+
+    with open(path, "wb") as f:
+        f.write(data)
+    print(f"saved: {path}  ({len(data)} B)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

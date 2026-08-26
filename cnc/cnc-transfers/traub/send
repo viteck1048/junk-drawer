@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""
+send — обгортка над `./traub send` цього каталогу.
+
+Навіщо вона тут, якщо нічого не підставляє. Заради однакової будови каталогів:
+у кожному верстаті два входи звуться однаково — `./send` і `./recv`, — і біля
+верстата не треба згадувати, у якого з них інструмент зветься `traub`, а в
+якого `sinumerik`. Уся різниця живе всередині обгортки, а не в памʼяті
+оператора.
+
+Чому нічого не підставляється, на відміну від каталогу Sinumerik. Там типові
+значення інструмента для стійки не годяться: `--gate 0` шле одразу, а `--wait 20`
+чекає DC1, якого та стійка не шле ніколи. Тут навпаки — Traub **шле DC1**, коли
+готовий приймати (NOTES.md: «дані йдуть після прийому DC1»), тож типове
+`--wait 600` правильне, і підмінювати нема чого. Обгортка лишається порожньою
+свідомо: підставляти щось «для симетрії» означало б зламати робочий шлях.
+
+Що вона таки робить: друкує повну команду перед запуском — щоб було видно, що
+саме пішло на верстат.
+
+`./traub send` сам відмовляється стартувати, якщо у файлі є байт >127 або менше
+двох `%` — це ловить саме ту поломку, яку вносить текстовий редактор. Обгортка
+цю перевірку не дублює.
+"""
+import os, subprocess, sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+TOOL = os.path.join(HERE, "traub")
+
+# Прапорці самого інструмента, а не підкоманди: мусять стояти ПЕРЕД словом
+# `send`, інакше argparse відмовляє. Значення True = прапорець зі значенням.
+GLOBAL = {"--port": True}
+
+HELP = """usage: send [options] FILE
+
+Send an NC program to the Traub TX8. Wrapper around './traub send'.
+
+Substitutes nothing: the tool's own defaults are already right for this
+machine -- it waits for DC1, and this machine does send DC1 when ready.
+The wrapper exists so that every machine directory has the same two
+entry points: ./send and ./recv.
+
+Options are passed through unchanged -- see './traub send --help'.
+
+Run this FIRST, then start the read-in on the machine.
+"""
+
+
+def main():
+    argv = sys.argv[1:]
+
+    if not argv or "-h" in argv or "--help" in argv:
+        print(HELP, end="")
+        return 0 if argv else 2
+
+    if not os.access(TOOL, os.X_OK):
+        sys.exit(f"tool not found or not executable: {TOOL}")
+
+    out, glob = [], []
+    skip = -1
+    for k, a in enumerate(argv):
+        if k == skip:
+            continue
+        base = a.split("=", 1)[0]
+        if base in GLOBAL:
+            glob.append(a)
+            if GLOBAL[base] and "=" not in a:
+                if k + 1 >= len(argv):
+                    sys.exit(f"{a} needs a value")
+                glob.append(argv[k + 1])
+                skip = k + 1
+            continue
+        out.append(a)
+
+    cmd = [TOOL] + glob + ["send"] + out
+    print("+ " + " ".join(cmd), flush=True)
+    return subprocess.call(cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

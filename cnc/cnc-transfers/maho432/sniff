@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+"""
+sniff — слухач RS232 для цього керування. Екземпляр каталогу MAHO MH 600 C
+(Philips/MAHO CNC 432-9).
+
+Нічого не припускає про протокол: слухає в сирому 8N1 на заданій швидкості,
+віддає байти як є і рахує статистику, з якої видно реальний формат на дроті.
+
+На диск не пише нічого. Захоплення повертається викликачеві з `capture()`,
+а що з ним робити далі — знає двигун каталогу (`./maho432 recv`, під ним
+обгортка `./recv`): саме там живе машинно-залежний розбір — зняття біта
+парності, звірка парності, збереження `.raw`. Поділ навмисний: слухач
+лишається чистою діагностикою лінії й однаковий для всіх верстатів, а знання
+про конкретне керування не розповзається по ньому.
+
+Тут `sniff` — не вхід у каталог, а інструмент розвідки, і для цього верстата
+він поки головний: протоколу ми ще не знаємо. Сира швидкість перевіряється
+`-b`, формат на дроті — вердиктом у кінці.
+
+Чому 8N1, а не «правильний» формат: біт парності приходить як 8-й біт даних,
+тож парність можна перевірити програмно. Якщо ж виставити парність у ядрі,
+збійні байти підмінюються на 0x00 і стають невідрізненними від справжніх нулів.
+Другий стоп-біт на прийомі значення не має — це просто зайвий простій лінії.
+
+DTR і RTS піднімаються й тримаються: для керування з апаратним хендшейком це
+означає «периферія готова приймати». CTS для прийому не потрібен — він обмежує
+лише нашу передачу.
+
+Копія в кожному каталозі верстата навмисна: каталог має переноситись на робоче
+місце цілим і працювати сам, без нічого ззовні. Спільний слухач у корені цього
+не давав, а ще й змушував щоразу згадувати швидкість чужого верстата.
+"""
+import argparse, collections, fcntl, glob, os, re, select, struct, sys, termios, time
+
+# -- прив'язка цього екземпляра до верстата ----------------------------------
+MACHINE = "maho432"         # для --help і повідомлень
+DEFAULT_BAUD = 4800         # NOTES.md: лінія 4800 7E1 + RTS/CTS (з цехового CIMCO)
+# Скільки тиші означає «передача скінчилась». 5 с — рівно те, що стоїть у
+# цеховому CIMCO (Receive timeout), і поки що єдиний критерій кінця, який ми
+# для цієї стійки маємо: маркера кінця там не задано, тригери порожні.
+# Найдовшу паузу ВСЕРЕДИНІ передачі capture() друкує — якщо вона підповзе до
+# цього числа, файл почне обриватись посеред програми й виглядати як успіх.
+DEFAULT_IDLE = 5.0
+# ----------------------------------------------------------------------------
+
+# Шляхи — від самого файлу, а не від домівки: каталог верстата має працювати
+# з будь-якого місця, куди його скопіюють.
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+TIOCMGET, TIOCMBIS = 0x5415, 0x5416
+M_DTR, M_RTS, M_CTS, M_DSR, M_DCD = 0x002, 0x004, 0x020, 0x100, 0x040
+
+BAUDS = {50: termios.B50, 75: termios.B75, 110: termios.B110, 134: termios.B134,
+         150: termios.B150, 200: termios.B200, 300: termios.B300, 600: termios.B600,
+         1200: termios.B1200, 1800: termios.B1800, 2400: termios.B2400,
+         4800: termios.B4800, 9600: termios.B9600, 19200: termios.B19200,
+         38400: termios.B38400, 57600: termios.B57600, 115200: termios.B115200}
+
+
+# ---------------------------------------------------------------- порт
+# Порт шукаємо в системі, а не за моделлю перехідника. Біля верстата він буде
+# рідний (на матплаті) або з плати розширення; USB-перехідник — властивість
+# конкретного лаптопа, а не стека.
+#
+#   --port вказано        -> беремо його, нічого не шукаємо;
+#   знайдено рівно один   -> беремо мовчки;
+#   знайдено більше       -> ПОВНА ВІДМОВА зі списком портів.
+#
+# Відмова жорстка навмисно: за трьома портами одного PC стоять три різні
+# верстати, і «здогадався сам» там означає «слухаємо не той верстат».
+
+UART = {"1": "8250", "2": "16450", "3": "16550", "4": "16550A", "5": "Cirrus",
+        "6": "16650", "7": "16650V2", "8": "16750", "9": "StarTech",
+        "10": "16C950", "11": "16654", "12": "16850", "13": "RSA"}
+
+
+def _sysfs(dev, attr):
+    try:
+        with open(f"/sys/class/tty/{dev}/{attr}") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _by_id(node):
+    """Стабільне імʼя з /dev/serial/by-id, якщо для вузла таке є."""
+    for link in sorted(glob.glob("/dev/serial/by-id/*")):
+        if os.path.realpath(link) == node:
+            return os.path.basename(link)
+    return ""
+
+
+def _natkey(node):
+    """ttyS10 має йти після ttyS2, а не між ttyS1 і ttyS2."""
+    m = re.search(r"\d+$", node)
+    return (re.sub(r"\d+$", "", node), int(m.group()) if m else -1)
+
+
+def list_ports():
+    """[(вузол, опис)] — порти, за якими справді є залізо.
+
+    /dev/ttyS0..S3 ядро заводить завжди, навіть коли UART за ними нема.
+    Порожню заглушку видно по /sys/class/tty/ttySN/type == 0 (PORT_UNKNOWN).
+    Дивимось саме sysfs, а не ioctl, щоб не відкривати порт: відкритий порт
+    у цеху може бути чужим сеансом передачі, у який лізти не можна.
+    """
+    out = []
+    for node in sorted(glob.glob("/dev/ttyS*"), key=_natkey):
+        dev = os.path.basename(node)
+        t = _sysfs(dev, "type")
+        if not t or t == "0":
+            continue
+        where = os.path.basename(os.path.realpath(f"/sys/class/tty/{dev}/device"))
+        out.append((node, f"UART {UART.get(t, 'type ' + t)}  {where}"))
+    for node in sorted(glob.glob("/dev/ttyUSB*"), key=_natkey):
+        out.append((node, "USB  " + (_by_id(node) or "adapter")))
+    return out
+
+
+def _acm():
+    """CDC-ACM у рахунок не беремо: це й модем, і Arduino, і сканер відбитків.
+    Відрізнити звідси справжній перехідник RS232 від решти неможливо."""
+    return sorted(glob.glob("/dev/ttyACM*"), key=_natkey)
+
+
+def find_port(explicit=None):
+    if explicit:
+        if not os.path.exists(explicit):
+            sys.exit(f"no such port: {explicit}")
+        return explicit
+    ports = list_ports()
+    if not ports:
+        sys.exit("no serial port found.\n"
+                 "  empty ttyS0..3 do not count: no hardware behind them (type=0)"
+                 + (f"\n  found {' '.join(_acm())} (CDC-ACM); if that is the"
+                    " adapter, name it with --port" if _acm() else ""))
+    if len(ports) > 1:
+        sys.exit("more than one port -- name the one you need with --port:\n"
+                 + "\n".join(f"  {n:16s} {d}" for n, d in ports)
+                 + "\nWhich port belongs to which machine: write it into NOTES.md.")
+    print(f"port {ports[0][0]} auto-detected  ({ports[0][1]})")
+    return ports[0][0]
+
+
+def show_ports():
+    """Показати порти, нічого не відкриваючи."""
+    ports = list_ports()
+    for node, desc in ports:
+        print(f"  {node:16s} {desc}")
+    if not ports:
+        print("  no port with hardware behind it")
+    if _acm():
+        print("  ignored (CDC-ACM, usually not RS232): " + " ".join(_acm()))
+    return 0
+
+
+def modem(fd):
+    return struct.unpack("I", fcntl.ioctl(fd, TIOCMGET, struct.pack("I", 0)))[0]
+
+
+def lines_str(st):
+    return "  ".join(f"{n}={'1' if st & m else '0'}" for n, m in
+                     [("CTS", M_CTS), ("DSR", M_DSR), ("DCD", M_DCD)])
+
+
+# ---------------------------------------------------------------- захоплення
+def capture(port=None, baud=DEFAULT_BAUD, wait=600.0, idle=DEFAULT_IDLE, dc1=False):
+    """Слухати лінію й ПОВЕРНУТИ почуте (bytes). На диск не пише нічого.
+
+    Це вся точка входу для обгортки: вона викликає capture(), отримує сирі
+    байти лінії й далі розбирає їх по-своєму. Порожній результат означає, що
+    за `wait` секунд не прийшло жодного байта.
+    """
+    if baud not in BAUDS:
+        sys.exit(f"baud rate {baud} not supported; available: {sorted(BAUDS)}")
+
+    node = find_port(port)
+    fd = os.open(node, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    os.set_blocking(fd, True)
+    a = termios.tcgetattr(fd)
+    a[0] = 0                                     # жодних IXON/INPCK/ISTRIP — усе сире
+    a[1] = 0
+    a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL | termios.HUPCL
+    a[3] = 0
+    a[4] = a[5] = BAUDS[baud]
+    a[6][termios.VMIN] = 0
+    a[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, a)
+    fcntl.ioctl(fd, TIOCMBIS, struct.pack("I", M_DTR | M_RTS))
+    time.sleep(0.2)
+    termios.tcflush(fd, termios.TCIFLUSH)
+
+    st0 = modem(fd)
+    print(f"port {node}, {baud} 8N1 raw")
+    print(f"lines at start: {lines_str(st0)}")
+    print(f"waiting for data (up to {wait:.0f} s)"
+          + (", sending DC1 every 2 s" if dc1 else "") + "...", flush=True)
+
+    buf = bytearray()
+    t_start = time.time()
+    deadline = t_start + wait
+    next_dc1 = 0.0
+    prev = st0
+    t_last = None          # коли прийшов попередній шматок
+    gap_max = 0.0          # найдовша тиша ВСЕРЕДИНІ передачі
+    gap_at = 0             # на якому байті вона трапилась
+
+    try:
+        while True:
+            if dc1 and not buf and time.time() >= next_dc1:
+                os.write(fd, b"\x11")
+                next_dc1 = time.time() + 2.0
+            r, _, _ = select.select([fd], [], [], 0.25)
+            if r:
+                chunk = os.read(fd, 4096)
+                if chunk:
+                    now = time.time()
+                    if not buf:
+                        print(f"[{now-t_start:6.1f}s] data started", flush=True)
+                    elif now - t_last > gap_max:
+                        gap_max, gap_at = now - t_last, len(buf)
+                    t_last = now
+                    buf += chunk
+                    deadline = now + idle
+                    continue
+            st = modem(fd)
+            if st != prev:                        # фіксуємо, коли ЧПК рухає лініями
+                print(f"[{time.time()-t_start:6.1f}s] lines: {lines_str(st)} "
+                      f"(bytes={len(buf)})", flush=True)
+                prev = st
+            if time.time() > deadline:
+                break
+    finally:
+        os.close(fd)
+
+    print(f"\nreceived: {len(buf)} B in {time.time()-t_start:.1f} s")
+    if not buf:
+        print("nothing arrived")
+    else:
+        # Найдовша пауза всередині передачі проти нашого --idle. Якщо перша
+        # наближається до другого, наступний прийом обірветься посеред програми.
+        margin = "" if gap_max < idle * 0.5 else "   <-- close to --idle, RAISE IT"
+        print(f"longest gap inside the data: {gap_max:.2f} s at byte {gap_at} "
+              f"(--idle is {idle:.2f} s){margin}")
+    return bytes(buf)
+
+
+# ---------------------------------------------------------------- аналіз
+def analyse(buf):
+    """Надрукувати, що видно про формат на дроті. Нічого не повертає."""
+    n = len(buf)
+    if not n:
+        return
+
+    even = sum(1 for b in buf if bin(b).count("1") % 2 == 0)
+    hi = sum(1 for b in buf if b & 0x80)
+    low = bytes(b & 0x7F for b in buf)
+    pr_low = sum(1 for c in low if c in (9, 10, 13) or 32 <= c < 127)
+    pr_raw = sum(1 for c in buf if c in (9, 10, 13) or 32 <= c < 127)
+
+    print("\n-- format on the wire --")
+    print(f"  even number of 1s    : {even}/{n} = {100*even/n:.1f}%")
+    print(f"  8th bit set          : {hi}/{n} = {100*hi/n:.1f}%")
+    print(f"  printable as is      : {100*pr_raw/n:.1f}%")
+    print(f"  printable after &0x7F: {100*pr_low/n:.1f}%")
+
+    distinct = len(set(buf))
+    if n < 32 or distinct < 3:
+        verdict = (f"sample too small to judge (n={n}, distinct bytes={distinct}). "
+                   "A run of 0x00 has even parity under any format -- "
+                   "it proves nothing.")
+    elif even == n:
+        verdict = "7 bits + EVEN parity (8th bit is the parity bit)"
+    elif even == 0:
+        verdict = "7 bits + ODD parity"
+    elif hi == 0:
+        verdict = "7 bits, no parity (7N), or 8 bits with a zero top bit"
+    elif pr_raw / n > 0.9:
+        verdict = "8 bits, no parity (8N)"
+    else:
+        verdict = "does not add up -- most likely the WRONG BAUD RATE, try another -b"
+    print(f"  VERDICT: {verdict}")
+
+    print("\n-- most frequent bytes --")
+    for b, c in collections.Counter(buf).most_common(10):
+        v = b & 0x7F
+        print(f"  0x{b:02X} x{c:<5d} low7=0x{v:02X} "
+              f"{repr(chr(v)) if 32 <= v < 127 else '.'}")
+
+    txt = low.decode("ascii", "replace")
+    print(f"\n-- first 500 characters (low7) --\n{txt[:500]!r}")
+    print(f"\n-- last 200 --\n{txt[-200:]!r}")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="sniff",
+                                description=f"raw RS232 capture ({MACHINE}); "
+                                            "prints what it hears, writes nothing. "
+                                            "To save a program to a file use ./recv")
+    p.add_argument("--port", help="port node, e.g. /dev/ttyS0; without it the port is "
+                                  "auto-detected, but only if there is exactly one")
+    p.add_argument("--ports", action="store_true",
+                   help="list the serial ports and exit")
+    p.add_argument("-b", "--baud", type=int, default=DEFAULT_BAUD)
+    p.add_argument("--wait", type=float, default=600.0, help="how long to wait for the first byte, s")
+    p.add_argument("--idle", type=float, default=DEFAULT_IDLE,
+                   help="silence means end of data, s")
+    p.add_argument("--dc1", action="store_true",
+                   help="send DC1 every 2 s (for XON/XOFF controls; not needed for hardware handshake)")
+    args = p.parse_args()
+
+    if args.ports:
+        return show_ports()
+
+    buf = capture(port=args.port, baud=args.baud,
+                  wait=args.wait, idle=args.idle, dc1=args.dc1)
+    if not buf:
+        return 1
+    analyse(buf)
+    return 0
+
+
+if __name__ == "__main__":
+    # Ctrl-C — штатний спосіб припинити слухання, а не аварія: без цього
+    # оператор біля верстата бачить traceback і не знає, чи щось зламав.
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+        sys.exit(130)
