@@ -1,0 +1,106 @@
+
+# installing all required packages using rpm-ostree
+
+sudo rpm-ostree install libnl3
+sudo rpm-ostree install iptables
+sudo rpm-ostree install psmisc
+sudo rpm-ostree install libatomic
+sudo rpm-ostree install brotli
+sudo rpm-ostree install iproute
+sudo rpm-ostree install ca-certificates
+sudo rpm-ostree install libxkbcommon
+sudo rpm-ostree install xterm
+sudo rpm-ostree install libglvnd-opengl
+sudo rpm-ostree install procps-ng
+sudo rpm-ostree install glib2
+
+# system reboot
+
+sudo systemctl reboot
+
+############################
+
+# updating / reinstalling: just run the wrapper script, it auto-detects
+# the newest expressvpn-linux-universal*_release.run in Завантажене/Downloads
+# and does everything below automatically (still needs sudo interactively)
+
+expressvpn-update.sh
+# or, with an explicit package path:
+# expressvpn-update.sh /path/to/expressvpn-linux-universal-X.Y.Z.NNNNN_release.run
+
+# script source: ~/expressvpn/expressvpn-update.sh (+ expressvpn-full-install.sh for a from-scratch setup)
+# symlinked into ~/.local/bin so they run from anywhere by name
+
+#############################
+# manual steps (what the script above does, kept here for reference)
+#############################
+
+# unpacking *.run and installing expressvpn manually (x64 version)
+
+(cd Завантажене)
+./expressvpn-linux-universal-14.2.1.13658_release.run --noexec --keep --target /tmp/expressvpn
+
+# Creating the necessary groups (skip if already installed/updating)
+sudo groupadd expressvpn
+sudo groupadd expressvpnhnsd
+
+# Creating a directory
+sudo mkdir -p /opt/expressvpn/{bin,etc,var,share,lib,plugins,qml}
+
+# Stop the running daemon before overwriting files (update only)
+sudo systemctl stop expressvpn
+
+# Copying files from the unpacked archive
+sudo cp -r /tmp/expressvpn/x64/expressvpnfiles/* /opt/expressvpn/
+sudo cp /tmp/expressvpn/x64/installfiles/*.sh /opt/expressvpn/bin/
+sudo chmod +x /opt/expressvpn/bin/*.sh
+
+# Setting permissions for unbound
+sudo setcap 'cap_net_bind_service=+ep' /opt/expressvpn/bin/expressvpn-unbound
+
+# Copying the icon and .desktop file
+sudo cp /tmp/expressvpn/x64/installfiles/expressvpn.desktop /home/<username>/.local/share/applications/expressvpn.desktop
+sudo cp /tmp/expressvpn/x64/installfiles/app-icon.png /home/<username>/.local/share/icons/hicolor/256x256/apps/expressvpn.png
+
+# Configuring NetworkManager for WireGuard
+sudo mkdir -p /etc/NetworkManager/conf.d
+echo -e "[keyfile]\nunmanaged-devices=interface-name:wgexpressvpn*" | sudo tee /etc/NetworkManager/conf.d/wgexpressvpn.conf > /dev/null
+
+# Create a symlink for expressvpnctl (skip if already exists, update only)
+sudo ln -s /opt/expressvpn/bin/expressvpnctl /usr/local/bin/expressvpnctl
+
+# Copying the service file
+sudo cp /tmp/expressvpn/x64/installfiles/expressvpn-service.service /etc/systemd/system/expressvpn.service
+
+# Restart systemd and activate the service
+sudo systemctl daemon-reload
+sudo systemctl enable expressvpn
+sudo systemctl start expressvpn
+
+# system reboot and final check
+(sudo systemctl reboot)
+
+#############################
+
+sudo systemctl status expressvpn
+    ● expressvpn.service - ExpressVPN daemon
+        Loaded: loaded (/etc/systemd/system/expressvpn.service; enabled; preset: disabled)
+        Drop-In: /usr/lib/systemd/system/service.d
+                └─10-timeout-abort.conf
+        Active: active (running) since Tue 2026-08-25 16:23:20 EEST
+    Invocation: 74db9240fbf1425385ad9e22e99824a4
+    Main PID: 1901 (expressvpn-daem)
+        Tasks: 15 (limit: 73789)
+        Memory: 675M (peak: 688.8M)
+            CPU: 49.956s
+        CGroup: /system.slice/expressvpn.service
+                ├─ 1901 /opt/expressvpn/bin/expressvpn-daemon
+                └─40540 /var/opt/expressvpn/bin/expressvpn-lightway -c /opt/expressvpn/var/helium.conf
+
+    сер 25 16:23:20 bazzite systemd[1]: Started expressvpn.service - ExpressVPN daemon.
+
+expressvpnctl --version
+    14.2.1+13658  (upgraded from 14.1.1+13156)
+
+(expressvpnctl background enable)
+(expressvpnctl --help etc.)
