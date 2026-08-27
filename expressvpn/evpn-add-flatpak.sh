@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Usage: sudo ./evpn-add-flatpak.sh <flatpak-app-name-or-id> [bypass|vpnonly]
+# Usage: sudo ./evpn-add-flatpak.sh [<flatpak-app-name-or-id> [bypass|vpnonly]]
 # Example: sudo ./evpn-add-flatpak.sh firefox bypass
+# With no arguments: interactive fzf picker for both the app and the mode.
 #
 # Resolves the given name against your installed flatpaks, builds+installs
 # the split-tunnel shim on first run, registers the app with ExpressVPN,
@@ -20,40 +21,67 @@ fi
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
 
 usage() {
-    echo "Usage: $0 <flatpak-app-name-or-id> [bypass|vpnonly]" >&2
+    echo "Usage: $0 [<flatpak-app-name-or-id> [bypass|vpnonly]]" >&2
+    echo "  Run with no arguments for an interactive picker (needs fzf)." >&2
     exit 1
 }
 
-[ $# -ge 1 ] || usage
-QUERY="$1"
-MODE="${2:-bypass}"
+if [ $# -eq 0 ]; then
+    # --- interactive: pick the app, then the mode, both via fzf ---
+    command -v fzf >/dev/null 2>&1 || {
+        echo "No arguments given and fzf is not installed/in PATH." >&2
+        echo "Either install fzf or pass the app name directly." >&2
+        usage
+    }
+
+    APP_LIST="$(sudo -u "$REAL_USER" flatpak list --app --columns=application,name)"
+    [ -n "$APP_LIST" ] || { echo "$REAL_USER has no flatpak apps installed." >&2; exit 1; }
+
+    SELECTED="$(printf '%s\n' "$APP_LIST" | fzf --delimiter=$'\t' --with-nth=2,1 \
+        --prompt='flatpak app> ' \
+        --header='type to filter, arrows + Enter to pick, Esc to cancel')"
+    [ -n "$SELECTED" ] || { echo "Nothing selected, aborting." >&2; exit 1; }
+
+    APP_ID="$(printf '%s\n' "$SELECTED" | cut -f1)"
+    APP_NAME="$(printf '%s\n' "$SELECTED" | cut -f2-)"
+    echo "Selected: $APP_ID ($APP_NAME)"
+
+    MODE_SELECTED="$(printf 'bypass\tBypass VPN (exclude from tunnel)\nvpnonly\tOnly VPN (require tunnel)\n' \
+        | fzf --delimiter=$'\t' --with-nth=2 \
+              --prompt='mode> ' --header="app: $APP_NAME")"
+    [ -n "$MODE_SELECTED" ] || { echo "Nothing selected, aborting." >&2; exit 1; }
+    MODE="$(printf '%s\n' "$MODE_SELECTED" | cut -f1)"
+else
+    # --- non-interactive: resolve the flatpak app id from what was typed ---
+    QUERY="$1"
+    MODE="${2:-bypass}"
+
+    MATCHES="$(sudo -u "$REAL_USER" flatpak list --app --columns=application,name \
+        | grep -i -F -- "$QUERY" || true)"
+
+    if [ -z "$MATCHES" ]; then
+        echo "No installed flatpak app matches '$QUERY'. Installed apps:" >&2
+        sudo -u "$REAL_USER" flatpak list --app --columns=application,name >&2
+        exit 1
+    fi
+
+    MATCH_COUNT="$(printf '%s\n' "$MATCHES" | wc -l)"
+    if [ "$MATCH_COUNT" -gt 1 ]; then
+        echo "Multiple matches for '$QUERY', be more specific:" >&2
+        printf '%s\n' "$MATCHES" >&2
+        exit 1
+    fi
+
+    APP_ID="$(printf '%s\n' "$MATCHES" | cut -f1)"
+    APP_NAME="$(printf '%s\n' "$MATCHES" | cut -f2-)"
+    echo "Resolved '$QUERY' -> $APP_ID ($APP_NAME)"
+fi
 
 case "$MODE" in
     bypass)  EVPN_MODE_PREFIX="bypass" ;;
     vpnonly) EVPN_MODE_PREFIX="vpn" ;;
     *) echo "Mode must be 'bypass' or 'vpnonly'" >&2; usage ;;
 esac
-
-# --- resolve the flatpak app id from what was typed ---
-MATCHES="$(sudo -u "$REAL_USER" flatpak list --app --columns=application,name \
-    | grep -i -F -- "$QUERY" || true)"
-
-if [ -z "$MATCHES" ]; then
-    echo "No installed flatpak app matches '$QUERY'. Installed apps:" >&2
-    sudo -u "$REAL_USER" flatpak list --app --columns=application,name >&2
-    exit 1
-fi
-
-MATCH_COUNT="$(printf '%s\n' "$MATCHES" | wc -l)"
-if [ "$MATCH_COUNT" -gt 1 ]; then
-    echo "Multiple matches for '$QUERY', be more specific:" >&2
-    printf '%s\n' "$MATCHES" >&2
-    exit 1
-fi
-
-APP_ID="$(printf '%s\n' "$MATCHES" | cut -f1)"
-APP_NAME="$(printf '%s\n' "$MATCHES" | cut -f2-)"
-echo "Resolved '$QUERY' -> $APP_ID ($APP_NAME)"
 
 SYNTH_PATH="$SYNTH_DIR/$APP_ID"
 NEED_RESTART=0

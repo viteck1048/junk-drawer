@@ -141,6 +141,12 @@ way — the client has no notion of "Firefox the flatpak" at all.
 
     sudo ./evpn-add-flatpak.sh <flatpak-app-name-or-id> [bypass|vpnonly]
     sudo ./evpn-add-flatpak.sh firefox bypass
+    sudo ./evpn-add-flatpak.sh          # interactive: fzf picker for app, then mode
+
+Run with no arguments and it drops into an `fzf` picker instead: type to filter
+your installed flatpaks, arrows + Enter to pick one, then the same for
+bypass/vpnonly. Needs `fzf` on `PATH`; falls back to a usage message if it's
+missing.
 
 On first run it builds and installs an `LD_PRELOAD` shim
 (`/usr/local/lib/evpn_flatpak_shim.so`) into `expressvpn.service` via a systemd
