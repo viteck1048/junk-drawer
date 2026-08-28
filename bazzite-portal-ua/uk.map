@@ -1,0 +1,357 @@
+# Український переклад Bazzite Portal.
+# Формат:  ключ = переклад
+#   scr:<індекс>:title|desc   — вкладка
+#   act:<id>:title|desc       — дія (id з /usr/share/yafti/yafti.yml)
+#   opt:<англійська назва>    — напис на кнопці у вікні дії
+# Значення "=" означає «англійський текст лишається як є» (назви брендів).
+# Рядки, яких тут немає, показуються англійською.
+
+# ── Вкладки ───────────────────────────────────────────────────────────
+scr:0:title = Ласкаво просимо!
+scr:0:desc = Знайомство з Bazzite
+scr:1:title = Встановлення програм
+scr:1:desc = Отримання й налаштування ПЗ
+scr:2:title = Медіапрограми
+scr:2:desc = Налаштування стримінгових сервісів
+scr:3:title = Керування Bazzite
+scr:3:desc = Керування системою та її налаштування
+scr:4:title = Тонке налаштування
+scr:4:desc = Системні корективи та інструменти
+scr:5:title = Усунення несправностей
+scr:5:desc = Інструменти й ресурси для діагностики та усунення проблем
+
+# ── Ласкаво просимо ───────────────────────────────────────────────────
+act:bazzite-documentation:title = Читати документацію Bazzite
+act:bazzite-documentation:desc = Уперше в Bazzite або Linux? Загляньте в нашу документацію. Офлайн-версія доступна за пошуком ‘Documentation’ у меню програм.
+act:bazaar:title = Відкрити свій Bazaar
+act:bazaar:desc = Ваша крамниця програм! Перегляньте добірку на кшталт Discord, Heroic Games Launcher чи Viper.
+act:bazzite-discord:title = Отримати допомогу в Discord
+act:bazzite-discord:desc = Офіційний сервер техпідтримки користувачів Bazzite. Не забудьте системні логи!
+act:bazzite-discourse:title = Оголошення на Discourse
+act:bazzite-discourse:desc = Дописи на форумі з найсвіжішими новинами про Bazzite!
+act:reddit:title = Спільнота на Reddit
+act:reddit:desc = Почніть розмову, поставте питання або похваліться своєю збіркою Bazzite!
+
+# ── Встановлення програм ──────────────────────────────────────────────
+act:android-platform-tools:title = =
+act:android-platform-tools:desc = Інструменти командного рядка для роботи з операційною системою Android — встановлюються через Brew.
+act:antigravity-linux:title = =
+act:antigravity-linux:desc = IDE з підтримкою ШІ від Google — встановлюється через Brew.
+act:asus:title = asusctl і ROG Control Center
+act:asus:desc = Утиліти для керування обладнанням ASUS.
+act:bazzite-cli:title = =
+act:bazzite-cli:desc = Налаштувати оболонку командного рядка (CLI) у стилі Bluefin з набором утиліт.
+act:boxtron:title = =
+act:boxtron:desc = Інструмент сумісності Steam Play для запуску DOS-ігор у нативному Linux DOSBox — встановлюється через Distrobox.
+act:coolercontrol:title = =
+act:coolercontrol:desc = Центр керування для перегляду датчиків і налаштування теплових профілів.
+act:davinci-resolve:title = =
+act:davinci-resolve:desc = Професійний нелінійний відеоредактор (NLE) від Blackmagic Design — встановлюється через davincibox.
+act:decky-loader:title = =
+act:decky-loader:desc = Завантажувач плагінів для Steam, створений для Steam Deck.
+act:decky-bazzite-buddy:title = Плагін Decky — Bazzite Buddy
+act:decky-bazzite-buddy:desc = Дозволяє переглядати зміни версій Bazzite просто в ігровому режимі.
+act:decky-lossless-scaling:title = Плагін Decky — Lossless Scaling
+act:decky-lossless-scaling:desc = Спрощує налаштування генерації кадрів Lossless Scaling.
+act:decky-framegen:title = Плагін Decky — OptiScaler
+act:decky-framegen:desc = Налаштовує OptiScaler для будь-якої гри Steam — інструмент керування апскейлінгом і генерацією кадрів.
+act:emudeck:title = =
+act:emudeck:desc = Готова добірка для емуляції відеоігор, створена для Steam Deck.
+act:jetbrains-toolbox-linux:title = =
+act:jetbrains-toolbox-linux:desc = Утиліта для керування встановленими IDE від JetBrains — встановлюється через Brew.
+act:lm-studio-linux:title = =
+act:lm-studio-linux:desc = Середовище для локального запуску великих мовних моделей (LLM) — встановлюється через Brew.
+act:lsfg-vk:title = Lossless Scaling — шар Vulkan
+act:lsfg-vk:desc = Встановити «lsfg-vk» — адаптер генерації кадрів Lossless Scaling для Linux.
+act:openrazer:title = =
+act:openrazer:desc = Створене спільнотою ПЗ підтримки ігрового обладнання Razer у Linux.
+act:openrgb:title = =
+act:openrgb:desc = Незалежне від виробника відкрите керування RGB-підсвіткою.
+act:opentabletdriver:title = =
+act:opentabletdriver:desc = Відкритий, гнучко налаштовуваний і високосумісний драйвер графічних планшетів.
+act:proton-plus:title = =
+act:proton-plus:desc = ProtonPlus допомагає встановлювати, оновлювати, вилучати й упорядковувати інструменти сумісності для Steam та інших ігрових лаунчерів у Linux.
+act:resilio-sync:title = =
+act:resilio-sync:desc = Утиліта синхронізації файлів на основі BitTorrent.
+act:steamcmd:title = =
+act:steamcmd:desc = Версія клієнта Steam для командного рядка, передусім для виділених ігрових серверів.
+act:sunshine:title = =
+act:sunshine:desc = Власний хост стримінгу відеоігор для Moonlight.
+act:visual-studio-code-linux:title = =
+act:visual-studio-code-linux:desc = Відкритий редактор коду й зневаджувач від Microsoft — встановлюється через Brew.
+act:vscodium-linux:title = =
+act:vscodium-linux:desc = Повністю відкрита збірка Visual Studio Code від спільноти — встановлюється через Brew.
+act:waydroid:title = =
+act:waydroid:desc = Система Android у контейнері для сумісності з застосунками в Linux. Несумісна з драйверами NVIDIA.
+
+# ── Медіапрограми ─────────────────────────────────────────────────────
+act:amazon-luna:title = =
+act:amazon-luna:desc = Хмарний ігровий сервіс від Amazon.
+act:amazon-prime-video:title = =
+act:amazon-prime-video:desc = Підписковий сервіс розваг на вимогу.
+act:apple-tv:title = =
+act:apple-tv:desc = Підписковий сервіс розваг на вимогу.
+act:crunchyroll:title = =
+act:crunchyroll:desc = Підписковий сервіс, зосереджений на японській анімації на вимогу.
+act:curiosity-stream:title = =
+act:curiosity-stream:desc = Підписковий сервіс нонфікшн-контенту на вимогу.
+act:disney-plus:title = =
+act:disney-plus:desc = Підписковий сервіс розваг на вимогу.
+act:hbo-max:title = =
+act:hbo-max:desc = Підписковий сервіс розваг на вимогу.
+act:hulu:title = =
+act:hulu:desc = Підписковий сервіс розваг на вимогу.
+act:jellyfin:title = =
+act:jellyfin:desc = Вільний (у сенсі ‘свободи’) клієнт для власного медіасховища.
+act:netflix:title = =
+act:netflix:desc = Популярний підписковий сервіс розваг на вимогу.
+act:paramount-plus:title = =
+act:paramount-plus:desc = Підписковий сервіс розваг на вимогу.
+act:peacock:title = =
+act:peacock:desc = Підписковий сервіс розваг на вимогу від NBCUniversal.
+act:plex-htpc:title = =
+act:plex-htpc:desc = Клієнт для відео на вимогу або власного медіасховища.
+act:sling-tv:title = =
+act:sling-tv:desc = Сервіс стримінгу живого телебачення.
+act:spotify:title = =
+act:spotify:desc = Популярний сервіс потокової музики.
+act:vimeo:title = =
+act:vimeo:desc = Сервіс поширення відео — наживо або на вимогу.
+act:xbox-cloud-gaming:title = =
+act:xbox-cloud-gaming:desc = Хмарний ігровий сервіс від Microsoft.
+act:youtube:title = =
+act:youtube:desc = Популярна платформа поширення відео — наживо або на вимогу.
+act:youtube-music:title = =
+act:youtube-music:desc = Сервіс потокової музики.
+act:youtube-tv:title = =
+act:youtube-tv:desc = Підписковий сервіс стримінгу живого телебачення.
+
+# ── Керування Bazzite ─────────────────────────────────────────────────
+act:update-bazzite:title = Оновити систему
+act:update-bazzite:desc = Оновити Bazzite, програми Flatpak тощо.
+act:rebase-bazzite-stable:title = Перейти на стабільну гілку оновлень
+act:rebase-bazzite-stable:desc = Перевести систему на образ Bazzite з міткою «stable».
+act:rebase-bazzite-testing:title = Перейти на тестову гілку оновлень
+act:rebase-bazzite-testing:desc = Перевести систему на образ Bazzite з міткою «testing».
+act:reset-bazzite:title = Скинути нашарування системного ПЗ
+act:reset-bazzite:desc = Повернути шари «rpm-ostree» до типового стану, вилучивши додані пакунки. Дані користувача не зачіпаються.
+act:cancel-pending-deployment:title = Скасувати заплановане розгортання
+act:cancel-pending-deployment:desc = Вилучити наступне розгортання образу, скасувавши всі оновлення й зміни шарів, що чекають на перезавантаження.
+act:verify-image:title = Перейти на ‘перевірений’ образ
+act:verify-image:desc = Визначити, чи ви на ‘неперевіреному’ образі Bazzite, і за потреби перевести вас на підписаний.
+act:wake-on-lan:title = Увімкнути Wake-on-LAN
+act:wake-on-lan:desc = Перемкнути виявлення ‘магічного пакета’ вашим мережевим адаптером, щоб вмикати пристрій віддалено.
+act:cec-sleep-standby:title = Увімкнути синхронізацію сну через CEC
+act:cec-sleep-standby:desc = Перемкнути переведення телевізора в очікування разом зі сном системи через HDMI-CEC. Потрібне сумісне з CEC обладнання або окремий адаптер.
+act:tailscale:title = Увімкнути Tailscale
+act:tailscale:desc = Перемкнути службу Tailscale для підтримки mesh-VPN.
+act:cockpit:title = Увімкнути Cockpit
+act:cockpit:desc = Перемкнути службу вебінтерфейсу Cockpit для централізованого керування системою з браузера.
+act:ssh-service:title = Увімкнути віддалений доступ SSH
+act:ssh-service:desc = Перемкнути службу захищеної оболонки (SSH) для розширеного віддаленого керування.
+act:hide-grub:title = Керувати видимістю меню GRUB
+act:hide-grub:desc = Налаштувати, чи має меню GRUB з’являтися під час завантаження системи.
+act:grub-timeout:title = Налаштувати час очікування меню GRUB
+act:grub-timeout:desc = Задати, скільки GRUB чекає перед запуском типового пункту. Конфігураційний файл GRUB буде перегенеровано.
+act:Reboot to UEFI:title = Перезавантажитись у налаштування UEFI
+act:Reboot to UEFI:desc = Перезавантажитись одразу в параметри UEFI вашої платформи — зручно для зміни пріоритету завантаження та інших налаштувань.
+
+# ── Тонке налаштування ────────────────────────────────────────────────
+act:add-input-group:title = Додати «input» до ваших груп користувача
+act:add-input-group:desc = Потрібне деяким драйверам ігрових контролерів.
+act:boot-to-windows:title = Завантаження у Windows зі Steam
+act:boot-to-windows:desc = Додати ярлик у Steam для автоматичного завантаження у Windows — може стати в пригоді при подвійному завантаженні.
+act:default-deck-session:title = Типовий режим входу для Deck
+act:default-deck-session:desc = Змінити, з чого стартує ваш Deck/HTPC — з ігрового режиму чи робочого столу
+act:steam-icons:title = Автоматично чистити піктограми Steam з робочого столу
+act:steam-icons:desc = Увімкнути скрипт входу, що прибирає з робочого столу піктограми, створені Steam — корисно, коли ігри встановлюються в ігровому режимі.
+act:snapper:title = Налаштувати знімки btrfs
+act:snapper:desc = Керувати знімками Snapper для «/var/home».
+act:watchdog:title = Вимкнути механізми відновлення watchdog
+act:watchdog:desc = Перемкнути постійні програмні/апаратні механізми нагляду, що відновлюють роботу за деяких збоїв.
+act:global-dlss:title = Увімкнути глобальне оновлення DLSS
+act:global-dlss:desc = Перемкнути автоматичне оновлення версій апскейлера. Потрібна спеціальна збірка Proton із цією можливістю (напр. Proton-GE, Proton-EM).
+act:global-fsr4-rdna3:title = Увімкнути глобальне оновлення FSR3.1+ до FSR4 — для відеокарт RDNA3
+act:global-fsr4-rdna3:desc = Перемкнути автооновлення апскейлера, специфічне для архітектури RDNA3 (напр. серія 7000). Потрібна спеціальна збірка Proton із цією можливістю.
+act:global-fsr4:title = Увімкнути глобальне оновлення FSR3.1+ до FSR4 — для відеокарт RDNA4
+act:global-fsr4:desc = Перемкнути автоматичне оновлення версій апскейлера. Потрібен Proton 10 або новіший, Proton-GE 10-25+ чи інша збірка з цією можливістю.
+act:configure-amd-hdmi21:title = Увімкнути HDMI 2.1 для відеокарт AMD
+act:configure-amd-hdmi21:desc = Задати параметр ядра для завантаження відеокарт AMD з додатковою функціональністю. Наразі це може спричиняти мерехтіння чи нестабільність сигналу на деяких дисплеях.
+act:password-asterisks:title = Показувати зірочки пароля в командному рядку
+act:password-asterisks:desc = Перемкнути відображення введених символів у запитах пароля «sudo».
+act:displaylink:title = Встановити підтримку DisplayLink
+act:displaylink:desc = Керувати підтримкою DisplayLink для док-станцій ноутбуків і USB-адаптерів дисплеїв.
+act:configure-beesd:title = Налаштувати дедуплікацію btrfs
+act:configure-beesd:desc = Налаштувати «beesd» для дедуплікації файлових систем btrfs.
+act:virtual-audio-channels:title = Налаштувати окремі віртуальні аудіоканали
+act:virtual-audio-channels:desc = Створити приймачі PipeWire для окремої маршрутизації звуку ‘Game’, ‘Voice’, ‘Browser’ і ‘Music’.
+act:virtual-headphone-surround:title = Налаштувати віртуальний об’ємний звук у навушниках
+act:virtual-headphone-surround:desc = Створити приймач PipeWire для об’ємного звуку 7.1, віртуалізованого для навушників через HRTF Steam Audio.
+act:virtualization:title = Налаштувати віртуалізацію
+act:virtualization:desc = Керувати підтримкою віртуалізації на хості для virt-manager.
+act:automounting:title = Перемкнути автоматичне монтування дисків
+act:automounting:desc = Керувати автомонтуванням розділів btrfs/ext4 з мітками в «/run/media/system».
+act:restore-input-remapper:title = Перемкнути Input Remapper
+act:restore-input-remapper:desc = Керувати Input Remapper або зробити його ярлик видимим в образах без робочого столу.
+act:steamos-automount:title = Перемкнути автомонтування дисків SteamOS
+act:steamos-automount:desc = Керувати правилами монтування, успадкованими від SteamOS — корисно, щоб розділи NTFS не монтувалися автоматично.
+
+# ── Усунення несправностей ────────────────────────────────────────────
+act:get-logs:title = Зібрати системні логи
+act:get-logs:desc = Зібрати системні записи та відомості у вебзвіт, яким можна поділитися.
+act:rollback-bazzite:title = Відкотитися до попереднього розгортання Bazzite
+act:rollback-bazzite:desc = Повернути ‘поточне розгортання’ до попереднього. Може стати в пригоді, якщо завантажений образ має проблему.
+act:update-nvidia-runtime:title = Оновити бібліотеки Flatpak для NVIDIA
+act:update-nvidia-runtime:desc = Вручну узгодити середовище виконання Flatpak із версією драйвера у вашому системному образі. Зазвичай це відбувається автоматично у фонових оновленнях.
+act:save-panics:title = Увімкнути збереження паніки ядра
+act:save-panics:desc = Перемкнути реєстратор паніки «ramoops», щоб записи про збої зберігалися після перезавантаження.
+act:fix-proton-hang:title = Завершити всі процеси Wine/Proton
+act:fix-proton-hang:desc = Надіслати сигнал «kill» процесам, що стосуються Wine/Proton. Може стати в пригоді, якщо щось зависло.
+act:fix-gmod:title = Пропатчити 64-бітну бета-версію Garry’s Mod
+act:fix-gmod:desc = Виправити стороннім патчем низку проблем нативної 64-бітної Linux-версії Garry’s Mod.
+act:fix-reset-steam:title = Скинути встановлення Steam
+act:fix-reset-steam:desc = Вилучити локальні файли Steam і завантажити їх наново із серверів Valve. Ігри та збереження видалено не буде!
+act:restart-pipewire:title = Перезапустити службу PipeWire
+act:restart-pipewire:desc = Перезапустити користувацьку службу звуку, відеообміну та з’єднань з MIDI-пристроями.
+act:bluetooth-headset-mic:title = Вимкнути мікрофон у Bluetooth-гарнітурах
+act:bluetooth-headset-mic:desc = Перемкнути профіль мікрофона, щоб окремі Bluetooth-пристрої зберігали повну якість відтворення.
+act:cec-mode:title = Змінити режим CEC
+act:cec-mode:desc = Змінити шлях бекенду HDMI-CEC. Маршрут через дискретну відеокарту надійніший для домашніх кінотеатрів, тоді як нативний краще підходить для портативних консолей і в деяких конфігураціях HTPC спричиняє проблеми зі сном/пробудженням.
+act:inputplumber:title = Перемкнути InputPlumber
+act:inputplumber:desc = Корисно при дубльованому вводі з контролера на десктопах/HTPC.
+act:intel-i915-sleep-fix:title = Налаштувати енергозбереження для Intel HD Graphics
+act:intel-i915-sleep-fix:desc = Керувати параметром енергозбереження «i915.enable_dc» для старіших відеоядер Intel i915 з проблемами присипання.
+act:benchmark:title = Базовий тест продуктивності процесора
+act:benchmark:desc = Запустити однохвилинну оцінку продуктивності ЦП.
+act:reisub:title = Увімкнути аварійне відновлення REISUB
+act:reisub:desc = Перемкнути ‘магічну’ клавішу SysRq і дозволити комбінацію REISUB для дещо безпечнішого примусового перезавантаження. Не рекомендовано, бо дає змогу обходити певні механізми безпеки.
+act:regenerate-grub:title = Перегенерувати конфігураційний файл GRUB
+act:regenerate-grub:desc = Створити нову конфігурацію GRUB із поточними параметрами. Буде повторно виконано пошук встановленої Windows як варіанта завантаження.
+
+# ── Кнопки у вікнах дій ───────────────────────────────────────────────
+opt:Add Bazzite Updater to Steam Big Picture = Додати Bazzite Updater у Steam Big Picture
+opt:Add Proton Plus to Steam Big Picture = Додати Proton Plus у Steam Big Picture
+opt:Add User to «input» Group = Додати користувача до групи «input»
+opt:Add Virtual Channels = Додати віртуальні канали
+opt:Add Virtual Headphone Surround = Додати віртуальний об’ємний звук у навушниках
+opt:Always Show GRUB = Завжди показувати GRUB
+opt:Configure = Налаштувати
+opt:Disable and Wipe Automatic Snapshots = Вимкнути й видалити автоматичні знімки
+opt:Disable Auto-Cleanup = Вимкнути автоочищення
+opt:Disable Automatic Snapshots = Вимкнути автоматичні знімки
+opt:Disable Automount = Вимкнути автомонтування
+opt:Disable Autoupgrading DLSS = Вимкнути автооновлення DLSS
+opt:Disable Autoupgrading FSR = Вимкнути автооновлення FSR
+opt:Disable Autoupgrading FSR (RDNA3) = Вимкнути автооновлення FSR (RDNA3)
+opt:Disable Bazzite CLI = Вимкнути Bazzite CLI
+opt:Disable Cockpit = Вимкнути Cockpit
+opt:Disable HDMI 2.1 for AMD Graphics Cards = Вимкнути HDMI 2.1 для відеокарт AMD
+opt:Disable HDMI-CEC Standby on System Sleep = Вимкнути очікування HDMI-CEC при сні системи
+opt:Disable InputPlumber = Вимкнути InputPlumber
+opt:Disable Input Remapper = Вимкнути Input Remapper
+opt:Disable Logging with «ramoops» = Вимкнути журналювання через «ramoops»
+opt:Disable Microphone Profile = Вимкнути профіль мікрофона
+opt:Disable Power Saving (i915.enable_dc=0) = Вимкнути енергозбереження (i915.enable_dc=0)
+opt:Disable REISUB Recovery = Вимкнути відновлення REISUB
+opt:Disable SSH Access = Вимкнути доступ SSH
+opt:Disable SteamOS Automounting = Вимкнути автомонтування SteamOS
+opt:Disable Sunshine Service = Вимкнути службу Sunshine
+opt:Disable Tailscale = Вимкнути Tailscale
+opt:Disable Virtualization Support = Вимкнути підтримку віртуалізації
+opt:Disable Wake-on-LAN = Вимкнути Wake-on-LAN
+opt:Disable Watchdog Recovery = Вимкнути відновлення watchdog
+opt:Enable Auto-Cleanup = Увімкнути автоочищення
+opt:Enable Automatic Snapshots = Увімкнути автоматичні знімки
+opt:Enable Automount = Увімкнути автомонтування
+opt:Enable Autoupgrading DLSS = Увімкнути автооновлення DLSS
+opt:Enable Autoupgrading FSR = Увімкнути автооновлення FSR
+opt:Enable Autoupgrading FSR (RDNA3) = Увімкнути автооновлення FSR (RDNA3)
+opt:Enable Bazzite CLI = Увімкнути Bazzite CLI
+opt:Enable Cockpit = Увімкнути Cockpit
+opt:Enable HDMI 2.1 for AMD Graphics Cards = Увімкнути HDMI 2.1 для відеокарт AMD
+opt:Enable HDMI-CEC Standby on System Sleep = Увімкнути очікування HDMI-CEC при сні системи
+opt:Enable InputPlumber = Увімкнути InputPlumber
+opt:Enable Input Remapper = Увімкнути Input Remapper
+opt:Enable Logging with «ramoops» = Увімкнути журналювання через «ramoops»
+opt:Enable Microphone Profile = Увімкнути профіль мікрофона
+opt:Enable REISUB Recovery = Увімкнути відновлення REISUB
+opt:Enable SSH Access = Увімкнути доступ SSH
+opt:Enable SteamOS Automounting = Увімкнути автомонтування SteamOS
+opt:Enable Sunshine = Увімкнути Sunshine
+opt:Enable Sunshine Beta (installed using Brew) = Увімкнути бета-версію Sunshine (через Brew)
+opt:Enable Tailscale = Увімкнути Tailscale
+opt:Enable Virtualization Support = Увімкнути підтримку віртуалізації
+opt:Enable Wake-on-LAN = Увімкнути Wake-on-LAN
+opt:Enable Watchdog Recovery = Увімкнути відновлення watchdog
+opt:Force Enable Wake-on-LAN = Примусово увімкнути Wake-on-LAN
+opt:Hide After Successful Boot = Ховати після успішного завантаження
+opt:Hide, Except in Dual-Booting = Ховати, крім подвійного завантаження
+opt:Hide Password Asterisks = Ховати зірочки пароля
+opt:Initialize = Ініціалізувати
+opt:Install asusctl & ROG Control Center = Встановити asusctl і ROG Control Center
+opt:Install Bazzite Buddy Plugin = Встановити плагін Bazzite Buddy
+opt:Install Boxtron = Встановити Boxtron
+opt:Install CoolerControl = Встановити CoolerControl
+opt:Install Decky = Встановити Decky
+opt:Install Decky Prerelease = Встановити Decky (передреліз)
+opt:Install DisplayLink Support = Встановити підтримку DisplayLink
+opt:Install EmuDeck = Встановити EmuDeck
+opt:Install Helper = Встановити помічник
+opt:Install Lossless Scaling Plugin = Встановити плагін Lossless Scaling
+opt:Install «lsfg-vk» = Встановити «lsfg-vk»
+opt:Install OpenRGB = Встановити OpenRGB
+opt:Install OpenTabletDriver = Встановити OpenTabletDriver
+opt:Install OptiScaler Plugin = Встановити плагін OptiScaler
+opt:Install Proton Plus = Встановити Proton Plus
+opt:Install Resilio Sync = Встановити Resilio Sync
+opt:Install SteamCMD = Встановити SteamCMD
+opt:Install/Upgrade DaVinci Resolve = Встановити/оновити DaVinci Resolve
+opt:Install without Frontend = Встановити без графічної оболонки
+opt:Install with Polychromatic = Встановити з Polychromatic
+opt:Install with Razer Genie = Встановити з Razer Genie
+opt:No Timeout = Без очікування
+opt:One-Time Removal = Прибрати одноразово
+opt:Open Btrfs Assistant = Відкрити Btrfs Assistant
+opt:Open Sunshine Management Portal = Відкрити панель керування Sunshine
+opt:Remove User from «input» Group = Вилучити користувача з групи «input»
+opt:Remove Virtual Channels = Вилучити віртуальні канали
+opt:Remove Virtual Headphone Surround = Вилучити віртуальний об’ємний звук у навушниках
+opt:Reset = Скинути
+opt:Route Natively (Handhelds) = Нативний маршрут (портативні)
+opt:Route through dGPU (HTPC) = Через дискретну відеокарту (HTPC)
+opt:Select GPU = Вибрати відеокарту
+opt:Set to Auto (i915.enable_dc=-1) = Автоматично (i915.enable_dc=-1)
+opt:Set to Desktop Mode = Режим робочого столу
+opt:Set to Game Mode = Ігровий режим
+opt:Set to Level 1 (i915.enable_dc=1) = Рівень 1 (i915.enable_dc=1)
+opt:Set to Level 2 (i915.enable_dc=2) = Рівень 2 (i915.enable_dc=2)
+opt:Set to Level 3 (i915.enable_dc=3) = Рівень 3 (i915.enable_dc=3)
+opt:Set to Level 4 (i915.enable_dc=4) = Рівень 4 (i915.enable_dc=4)
+opt:Setup Virtual Monitor = Налаштувати віртуальний монітор
+opt:Show Password Asterisks = Показувати зірочки пароля
+opt:Skip Menu (Press F8 or hold Shift to show GRUB) = Пропускати меню (F8 або утримуйте Shift, щоб показати GRUB)
+opt:Timeout After 10 Seconds = Очікувати 10 секунд
+opt:Timeout After 1 Second = Очікувати 1 секунду
+opt:Timeout After 3 Seconds = Очікувати 3 секунди
+opt:Timeout After 5 Seconds = Очікувати 5 секунд
+opt:Uninstall = Вилучити
+opt:Uninstall All = Вилучити все
+opt:Uninstall asusctl & ROG Control Center = Вилучити asusctl і ROG Control Center
+opt:Uninstall Bazzite Buddy Plugin = Вилучити плагін Bazzite Buddy
+opt:Uninstall Boxtron = Вилучити Boxtron
+opt:Uninstall CoolerControl = Вилучити CoolerControl
+opt:Uninstall DaVinci Resolve = Вилучити DaVinci Resolve
+opt:Uninstall Decky = Вилучити Decky
+opt:Uninstall DisplayLink Support = Вилучити підтримку DisplayLink
+opt:Uninstall EmuDeck = Вилучити EmuDeck
+opt:Uninstall Lossless Scaling Plugin = Вилучити плагін Lossless Scaling
+opt:Uninstall «lsfg-vk» = Вилучити «lsfg-vk»
+opt:Uninstall OpenRGB = Вилучити OpenRGB
+opt:Uninstall OpenTabletDriver = Вилучити OpenTabletDriver
+opt:Uninstall OptiScaler Plugin = Вилучити плагін OptiScaler
+opt:Uninstall SteamCMD = Вилучити SteamCMD
+opt:Uninstall Sunshine = Вилучити Sunshine
+opt:Unset Parameter = Скинути параметр
+opt:Update Now = Оновити зараз
+opt:Update Sunshine = Оновити Sunshine
+opt:Wait a Custom Amount = Задати власний час
