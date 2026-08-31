@@ -12,11 +12,16 @@
 // запис 2 — ABOUT_ME.TXT, якщо оператор дав коментар.
 // Файли користувача лягатимуть далі.
 //
-// Імʼя добирається саме: 000.IMG, як зайняте — 001.IMG, і так до 999.IMG.
+// Імʼя добирається саме: номер 000..999 плюс те, що оператор допише сам,
+// тобто 005.IMG або 005_proekt.IMG. Номер — це слот ґотека, і саме за ним
+// стійка показує образ на семисегментнику, тому він завжди спереду.
+// Вільний номер шукається ТІЛЬКИ по перших трьох байтах чужих імен:
+// 005_proekt.IMG зайняв слот 005 так само, як 005.IMG.
 //
-// Питає рівно одне: короткий коментар до образу, до 50 знаків латинкою.
-// Він лягає в перші 50 байтів ABOUT_ME.TXT, доповнений пробілами, а PACK.EXE
-// та UNPACK.EXE показують його в своїх списках. Порожній ввід — файла немає.
+// Питає рівно два: як назвати образ (можна нічого) і короткий коментар
+// до нього (теж можна нічого). Коментар лягає першим рядком ABOUT_ME.TXT
+// і закінчується CRLF; PACK.EXE та UNPACK.EXE показують його в своїх
+// списках. Кодування — cp1251, тобто латинка й кирилиця однаково.
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o NEWIMG.EXE newimg.cpp
 
@@ -60,9 +65,13 @@ static const char README[] =
 "\r\n"
 "HOW IT WAS CREATED\r\n"
 "By NEWIMG.EXE, which sits next to this image. That program creates an\r\n"
-"empty, correctly formatted image, asks for a short comment, and does\r\n"
-"nothing else. Each new image is named 000.IMG, 001.IMG, 002.IMG and so\r\n"
-"on, taking the first free number in the folder it is started from.\r\n"
+"empty, correctly formatted image, asks for a name and a short comment,\r\n"
+"and does nothing else. Every image starts with a three-digit number:\r\n"
+"000, 001, 002 and so on, the first free one in the folder it is started\r\n"
+"from. That number is the slot the machine shows on its display. After\r\n"
+"the number you may add anything you like: 005.IMG and 005_MOULD.IMG\r\n"
+"are the same slot 005, and NEWIMG.EXE looks only at the three digits\r\n"
+"when it picks the next free number.\r\n"
 "\r\n"
 "WHAT IT IS FOR\r\n"
 "It takes the place of a physical floppy disk. The USB stick is read by\r\n"
@@ -80,15 +89,20 @@ static const char README[] =
 "     opens a disk image as if it were a folder and writes your changes\r\n"
 "     straight back into the image.\r\n"
 "2. Copy the finished image onto the USB stick used by the machine.\r\n"
-"   You may rename it first; keep the .IMG extension.\r\n"
+"   You may rename it first; keep the .IMG extension and the three\r\n"
+"   digits at the front - they are the slot number.\r\n"
 "\r\n"
 "THE COMMENT: ABOUT_ME.TXT\r\n"
 "If you gave NEWIMG.EXE a comment, this image also holds ABOUT_ME.TXT.\r\n"
-"Its first line is that comment: 50 characters, padded with spaces.\r\n"
-"PACK.EXE and UNPACK.EXE read it and show it beside the image name in\r\n"
-"their lists, so you can tell the images apart without opening them.\r\n"
-"To change the comment, edit the first line and keep it exactly 50\r\n"
-"characters long. Deleting the file only leaves that column empty;\r\n"
+"Its first line is that comment, of any length up to 500 characters,\r\n"
+"ending at the line break. PACK.EXE and UNPACK.EXE read it and show it\r\n"
+"beside the image name in their lists, wrapped into lines of 50, so you\r\n"
+"can tell the images apart without opening them. In those lists a long\r\n"
+"comment shows its first line only, ending in three dots; the right\r\n"
+"arrow key opens it in full, the left arrow folds it back.\r\n"
+"To change the comment, edit the first line; nothing has to be padded.\r\n"
+"Write it in Latin or in Cyrillic, code page 1251, and save it as a\r\n"
+"plain text file. Deleting the file only leaves that column empty;\r\n"
 "nothing else breaks.\r\n"
 "\r\n"
 "FILE NAMING RULES INSIDE THE IMAGE\r\n"
@@ -116,9 +130,13 @@ static const char README[] =
 "\r\n"
 "KAK E NAPRAVEN\r\n"
 "S NEWIMG.EXE, koyto e do tozi obraz. Tazi programa pravi prazen,\r\n"
-"pravilno formatiran obraz, pita za kratak komentar i nishto poveche.\r\n"
-"Vseki nov obraz se kazva 000.IMG, 001.IMG, 002.IMG i taka natatak -\r\n"
-"vzema parviya svoboden nomer v papkata, ot koyato e startirana.\r\n"
+"pravilno formatiran obraz, pita za ime i za kratak komentar i nishto\r\n"
+"poveche. Vseki obraz zapochva s trytsifren nomer: 000, 001, 002 i taka\r\n"
+"natatak - parviya svoboden v papkata, ot koyato e startirana. Tozi\r\n"
+"nomer e slotat, koito mashinata pokazva na displeya si. Sled nomera\r\n"
+"mozhesh da dopishesh kakvoto iskash: 005.IMG i 005_MOULD.IMG sa edin i\r\n"
+"sasht slot 005, a NEWIMG.EXE gleda samo trite tsifri, kogato tarsi\r\n"
+"sledvashtiya svoboden nomer.\r\n"
 "\r\n"
 "ZA KAKVO SLUZHI\r\n"
 "Zamestva istinskata disketa. USB flashkata se chete ot Gotek emulator\r\n"
@@ -134,16 +152,21 @@ static const char README[] =
 "   - Total Commander: slozhi kursora varhu obraza i natisni Enter.\r\n"
 "     Toi otvarya obraza kato papka i zapisva promenite obratno v nego.\r\n"
 "2. Kopirai gotoviya obraz na USB flashkata na mashinata.\r\n"
-"   Mozhesh da go preimenuvash predi tova; zapazi razshirenieto .IMG.\r\n"
+"   Mozhesh da go preimenuvash predi tova; zapazi razshirenieto .IMG i\r\n"
+"   trite tsifri otpred - te sa nomerat na slota.\r\n"
 "\r\n"
 "KOMENTARAT: ABOUT_ME.TXT\r\n"
 "Ako si dal komentar na NEWIMG.EXE, v tozi obraz ima i ABOUT_ME.TXT.\r\n"
-"Parviyat mu red e tozi komentar: 50 znaka, dopalneni s intervali.\r\n"
-"PACK.EXE i UNPACK.EXE go chetat i go pokazvat do imeto na obraza v\r\n"
-"spisatsite si, za da razlichavash obrazite bez da gi otvaryash.\r\n"
-"Za da smenish komentara, redaktirai parviya red i go zapazi tochno\r\n"
-"50 znaka dalag. Ako iztriesh faila, kolonata prosto ostava prazna -\r\n"
-"nishto drugo ne se chupi.\r\n"
+"Parviyat mu red e tozi komentar - s dalzhina do 500 znaka, do kraya na\r\n"
+"reda. PACK.EXE i UNPACK.EXE go chetat i go pokazvat do imeto na obraza\r\n"
+"v spisatsite si, razdelen na redove po 50 znaka, za da razlichavash\r\n"
+"obrazite bez da gi otvaryash. Dalag komentar se pokazva samo s parviya\r\n"
+"si red, koito zavarshva s tri tochki; strelka nadyasno go otvarya\r\n"
+"tsyal, strelka nalyavo go zatvarya obratno.\r\n"
+"Za da smenish komentara, redaktirai parviya red - nishto ne se dopalva\r\n"
+"s intervali. Pishi na latinitsa ili na kirilitsa, kodova stranitsa\r\n"
+"1251, i zapazi faila kato obiknoven tekst. Ako iztriesh faila,\r\n"
+"kolonata prosto ostava prazna - nishto drugo ne se chupi.\r\n"
 "\r\n"
 "PRAVILA ZA IMENATA NA FAILOVETE VATRE V OBRAZA\r\n"
 "Samo kratki DOS imena: do 8 znaka, tochka, oshte do 3 znaka.\r\n"
@@ -160,19 +183,30 @@ static const char README[] =
 // Йде одразу за 50 байтами коментаря і CRLF.
 static const char ABOUT_BODY[] =
 "Do not delete this file.\r\n"
-"The 50 characters in the first line above are the comment for this\r\n"
-"image. PACK.EXE and UNPACK.EXE read them and show them next to the\r\n"
-"image in their lists. Keep the first line 50 characters long, padded\r\n"
-"with spaces, or the comment will come out wrong. Without this file\r\n"
-"the comment column simply stays empty; nothing else breaks.\r\n"
+"The first line above is the comment for this image: everything up to\r\n"
+"the line break, up to 500 characters, Latin or Cyrillic in code page\r\n"
+"1251. PACK.EXE and UNPACK.EXE read it and show it next to the image in\r\n"
+"their lists, wrapped into lines of 50 characters. Nothing is padded:\r\n"
+"just edit the first line and keep the rest of the file as it is.\r\n"
+"Without this file the comment column simply stays empty; nothing else\r\n"
+"breaks.\r\n"
 "\r\n"
 "Ne iztrivai tozi fail.\r\n"
-"Parvite 50 znaka na parviya red gore sa komentarat na tozi obraz.\r\n"
-"PACK.EXE i UNPACK.EXE go pokazvat v spisaka do imeto na obraza.\r\n"
-"Parviyat red tryabva da e tochno 50 znaka, dopalnen s intervali.\r\n"
-"Bez tozi fail kolonata s komentara ostava prazna - nishto drugo.\r\n";
+"Parviyat red gore e komentarat na tozi obraz: vsichko do kraya na\r\n"
+"reda, do 500 znaka, na latinitsa ili na kirilitsa (kodova stranitsa\r\n"
+"1251). PACK.EXE i UNPACK.EXE go pokazvat v spisaka do imeto na obraza,\r\n"
+"razdelen na redove po 50 znaka. Nishto ne se dopalva s intervali -\r\n"
+"prosto redaktirai parviya red. Bez tozi fail kolonata s komentara\r\n"
+"ostava prazna - nishto drugo.\r\n";
 
-#define ABOUT_MAX 50
+// Коментар: без доповнення пробілами, кінець — CRLF, довжина будь-яка до
+// COMMENT_MAX. Стеля потрібна не операторові, а самому файлу: перший рядок
+// має влізти в перший кластер образу, звідки його читають PACK і UNPACK.
+#define COMMENT_MAX 500
+
+// Ім'я образу після номера. Стеля — та сама, що в довгих іменах Windows;
+// у вужче місце вперся б хіба той, хто пише повість замість назви.
+#define NAME_MAX 255
 
 // ---- вивід ----------------------------------------------------------------
 static void say(const wchar_t *s)
@@ -183,16 +217,16 @@ static void say(const wchar_t *s)
         return;
     if (WriteConsoleW(h, s, (DWORD)wcslen(s), &n, NULL))
         return;
-    // вивід перенаправлено у файл — консольного API там немає, йдемо в UTF-8
+    // вивід перенаправлено у файл — консольного API там немає, йдемо в cp1251
     {
-        int need = WideCharToMultiByte(CP_UTF8, 0, s, -1, NULL, 0, NULL, NULL);
+        int need = WideCharToMultiByte(1251, 0, s, -1, NULL, 0, NULL, NULL);
         char *a;
         if (need <= 1)
             return;
         a = (char *)malloc((size_t)need);
         if (!a)
             return;
-        WideCharToMultiByte(CP_UTF8, 0, s, -1, a, need, NULL, NULL);
+        WideCharToMultiByte(1251, 0, s, -1, a, need, NULL, NULL);
         WriteFile(h, a, (DWORD)(need - 1), &n, NULL);
         free(a);
     }
@@ -224,7 +258,7 @@ static int read_line(wchar_t *buf, size_t cap)
             return 0;
         buf[n] = 0;
     } else {
-        char a[256];
+        char a[1024];
         DWORD got = 0;
         i = 0;
         while (i + 1 < sizeof(a)) {
@@ -238,7 +272,7 @@ static int read_line(wchar_t *buf, size_t cap)
         if (i == 0 && got == 0)
             return 0;
         a[i] = 0;
-        MultiByteToWideChar(CP_ACP, 0, a, -1, buf, (int)cap);
+        MultiByteToWideChar(1251, 0, a, -1, buf, (int)cap);
     }
     i = wcslen(buf);
     while (i > 0 && (buf[i - 1] == L'\r' || buf[i - 1] == L'\n' || buf[i - 1] == L' '))
@@ -324,47 +358,155 @@ static unsigned put_file(unsigned char *img, unsigned char *fat, unsigned *next,
     return first;
 }
 
-// коментар з клавіатури: до 50 знаків, тільки друковані ASCII.
-// 0 = оператор пропустив; інакше out[] — рівно ABOUT_MAX байтів з пробілами.
-static int ask_comment(char *out)
+// Чи лягає рядок у cp1251 без втрат. Саме в cp1251 коментар лежить в
+// ABOUT_ME.TXT, і саме його читають PACK з UNPACK; знак, якого там немає,
+// перетворився б на «?» вже після того, як образ записано.
+static int fits_cp1251(const wchar_t *s, char *out, int cap)
 {
-    wchar_t in[256];
+    BOOL used = FALSE;
+    int n = WideCharToMultiByte(1251, WC_NO_BEST_FIT_CHARS, s, -1,
+                                out, cap, "?", &used);
+    return n > 0 && !used;
+}
+
+// Ім'я образу після номера: тільки друкований ASCII і нічого з того, що
+// Windows не пускає в імена файлів. Порожній ввід — лишається сам номер.
+// 0 = імені не буде; інакше out[] — те, що допишеться після XXX_.
+static int ask_name(wchar_t *out, size_t cap, size_t room)
+{
+    wchar_t in[1024];
     for (;;) {
         size_t len, i;
         int bad = 0;
+        const wchar_t *dot;
 
-        say(L"\r\nShort comment for this image, up to 50 characters, Latin only.\r\n"
-            L"Press Enter on an empty line if you do not want one.\r\n"
-            L"Kratak komentar za tozi obraz, do 50 znaka, samo latinitsa.\r\n"
-            L"Prazen red = bez komentar.\r\n> ");
-        if (!read_line(in, 256) || !in[0])
+        say(L"\r\nName for this image, after the number. ASCII only.\r\n"
+            L"Press Enter on an empty line to leave just the number.\r\n"
+            L"Име на образа, след номера. Само букви ASCII.\r\n"
+            L"Празен ред = само номерът.\r\n> ");
+        if (!read_line(in, 1024) || !in[0])
             return 0;
 
+        // ".IMG" програма допише сама; хай оператор не сперечається з нею
         len = wcslen(in);
-        if (len > ABOUT_MAX) {
-            sayf(L"!! too long: %u characters, the limit is %u\r\n"
-                 L"!! tvarde dalgo: %u znaka, maksimum %u\r\n",
-                 (unsigned)len, ABOUT_MAX, (unsigned)len, ABOUT_MAX);
-            continue;
+        dot = (len > 4) ? in + len - 4 : NULL;
+        if (dot && (_wcsicmp(dot, L".IMG") == 0)) {
+            in[len - 4] = 0;
+            len -= 4;
         }
+        while (len > 0 && (in[len - 1] == L' ' || in[len - 1] == L'.'))
+            in[--len] = 0;
+        if (len == 0)
+            return 0;
+
         for (i = 0; i < len; i++)
-            if (in[i] < 32 || in[i] > 126)
+            if (in[i] < 32 || in[i] > 126 || wcschr(L"\\/:*?\"<>|", in[i]))
                 bad = 1;
         if (bad) {
-            say(L"!! Latin letters, digits and simple punctuation only.\r\n"
-                L"!! Samo latinitsa, tsifri i prosta punktuatsiya.\r\n");
+            say(L"!! Latin letters, digits and simple punctuation only;\r\n"
+                L"!! none of these:  \\ / : * ? \" < > |\r\n"
+                L"!! Само латиница, цифри и проста пунктуация;\r\n"
+                L"!! без тези знаци:  \\ / : * ? \" < > |\r\n");
             continue;
         }
-        memset(out, ' ', ABOUT_MAX);
-        for (i = 0; i < len; i++)
-            out[i] = (char)in[i];
+        if (len > NAME_MAX || len > room) {
+            size_t lim = (NAME_MAX < room) ? NAME_MAX : room;
+            sayf(L"!! too long: %u characters, %u fit here\r\n"
+                 L"!! твърде дълго: %u знака, тук се побират %u\r\n",
+                 (unsigned)len, (unsigned)lim, (unsigned)len, (unsigned)lim);
+            continue;
+        }
+        wcsncpy(out, in, cap - 1);
+        out[cap - 1] = 0;
         return 1;
     }
 }
 
+// Коментар з клавіатури. Довжина будь-яка до COMMENT_MAX, латинка й кирилиця
+// однаково. 0 = оператор пропустив; інакше out[] — сам коментар, без CRLF.
+static int ask_comment(wchar_t *out, size_t cap)
+{
+    wchar_t in[1024];
+    char probe[COMMENT_MAX * 2 + 4];
+    for (;;) {
+        size_t len, i;
+        int bad = 0;
+
+        say(L"\r\nShort comment for this image. Latin or Cyrillic.\r\n"
+            L"Press Enter on an empty line if you do not want one.\r\n"
+            L"Кратък коментар за този образ. Латиница или кирилица.\r\n"
+            L"Празен ред = без коментар.\r\n> ");
+        if (!read_line(in, 1024) || !in[0])
+            return 0;
+
+        len = wcslen(in);
+        for (i = 0; i < len; i++)
+            if (in[i] < 32 || in[i] == 127)
+                bad = 1;
+        if (bad) {
+            say(L"!! letters, digits and simple punctuation only.\r\n"
+                L"!! само букви, цифри и проста пунктуация.\r\n");
+            continue;
+        }
+        if (len > COMMENT_MAX) {
+            sayf(L"!! too long: %u characters, the limit is %u\r\n"
+                 L"!! твърде дълго: %u знака, максимум %u\r\n",
+                 (unsigned)len, (unsigned)COMMENT_MAX,
+                 (unsigned)len, (unsigned)COMMENT_MAX);
+            continue;
+        }
+        if (!fits_cp1251(in, probe, (int)sizeof(probe))) {
+            say(L"!! one of these characters cannot be written into the image;\r\n"
+                L"!! use Latin or Cyrillic only.\r\n"
+                L"!! някой от тези знаци не може да се запише в образа;\r\n"
+                L"!! пиши само на латиница или на кирилица.\r\n");
+            continue;
+        }
+        wcsncpy(out, in, cap - 1);
+        out[cap - 1] = 0;
+        return 1;
+    }
+}
+
+// Перший вільний номер образу. Дивимось ТІЛЬКИ на перші три байти імені:
+// 005.IMG і 005_proekt.IMG — той самий слот 005, бо для стійки значить саме
+// номер, а не те, що оператор дописав після нього. -1 = вільних немає.
+static int next_number(const wchar_t *dir)
+{
+    static char taken[1000];
+    wchar_t pat[MAX_PATH];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    int i;
+
+    memset(taken, 0, sizeof(taken));
+    _snwprintf(pat, MAX_PATH - 1, L"%s\\*.img", dir);
+    pat[MAX_PATH - 1] = 0;
+    h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            const wchar_t *f = fd.cFileName;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            if (f[0] < L'0' || f[0] > L'9') continue;
+            if (f[1] < L'0' || f[1] > L'9') continue;
+            if (f[2] < L'0' || f[2] > L'9') continue;
+            taken[(f[0] - L'0') * 100 + (f[1] - L'0') * 10 + (f[2] - L'0')] = 1;
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    for (i = 0; i < 1000; i++)
+        if (!taken[i])
+            return i;
+    return -1;
+}
+
 int main(void)
 {
-    SetConsoleOutputCP(CP_UTF8);
+    // Консоль у cp1251: у ній однаково лягають латинка й кирилиця, і саме в
+    // цьому кодуванні коментар піде в ABOUT_ME.TXT.
+    SetConsoleOutputCP(1251);
+    SetConsoleCP(1251);
 
     // ---- тека, де лежить сам exe (а не поточна тека процесу) --------------
     wchar_t exe[MAX_PATH];
@@ -381,28 +523,53 @@ int main(void)
     *slash = 0;                       // тепер exe == тека
     const wchar_t *dir = exe;
 
-    // ---- перше вільне імʼя 000.IMG .. 999.IMG ----------------------------
-    wchar_t path[MAX_PATH];
-    int n;
-    for (n = 0; n < 1000; n++) {
-        _snwprintf(path, MAX_PATH - 1, L"%s\\%03d.IMG", dir, n);
-        path[MAX_PATH - 1] = 0;
-        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
-            break;
+    // ---- перший вільний номер 000..999 -----------------------------------
+    wchar_t path[MAX_PATH], fname[MAX_PATH], nick[NAME_MAX + 1];
+    int n = next_number(dir);
+    int room;
+    if (n < 0) {
+        say(L"!! all slots from 000 to 999 are taken in this folder\r\n");
+        fail();
     }
-    if (n >= 1000) {
-        say(L"!! all names from 000.IMG to 999.IMG are taken\r\n");
+
+    // ---- як назвати образ -------------------------------------------------
+    // скільки знаків лишилось на власне ім'я: тека + \ + "000_" + ім'я + ".IMG"
+    room = MAX_PATH - 1 - (int)wcslen(dir) - 1 - 4 - 4;
+    nick[0] = 0;
+    if (room < 1)
+        say(L"\r\nThe path to this folder is too long for a name; "
+            L"the image will be just a number.\r\n");
+    else if (!ask_name(nick, NAME_MAX + 1, (size_t)room))
+        nick[0] = 0;
+
+    if (nick[0])
+        _snwprintf(fname, MAX_PATH - 1, L"%03d_%s.IMG", n, nick);
+    else
+        _snwprintf(fname, MAX_PATH - 1, L"%03d.IMG", n);
+    fname[MAX_PATH - 1] = 0;
+    _snwprintf(path, MAX_PATH - 1, L"%s\\%s", dir, fname);
+    path[MAX_PATH - 1] = 0;
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
+        sayf(L"!! %s already exists in this folder\r\n", fname);
         fail();
     }
 
     // ---- коментар до образу ----------------------------------------------
-    static char about[ABOUT_MAX + 2 + sizeof(ABOUT_BODY)];
+    // cp1251 однобайтове, тому знаків і байтів тут однаково
+    static char about[COMMENT_MAX + 2 + sizeof(ABOUT_BODY)];
+    wchar_t note[COMMENT_MAX + 1];
     unsigned abosize = 0;
-    if (ask_comment(about)) {
-        about[ABOUT_MAX]     = '\r';
-        about[ABOUT_MAX + 1] = '\n';
-        memcpy(about + ABOUT_MAX + 2, ABOUT_BODY, sizeof(ABOUT_BODY) - 1);
-        abosize = ABOUT_MAX + 2 + (unsigned)(sizeof(ABOUT_BODY) - 1);
+    note[0] = 0;
+    if (ask_comment(note, COMMENT_MAX + 1)) {
+        int nb = WideCharToMultiByte(1251, 0, note, -1, about,
+                                     COMMENT_MAX + 1, NULL, NULL);
+        if (nb > 1) {
+            unsigned k = (unsigned)(nb - 1);        // без завершального нуля
+            about[k++] = '\r';
+            about[k++] = '\n';
+            memcpy(about + k, ABOUT_BODY, sizeof(ABOUT_BODY) - 1);
+            abosize = k + (unsigned)(sizeof(ABOUT_BODY) - 1);
+        }
     }
 
     // ---- том у памʼяті ----------------------------------------------------
@@ -477,23 +644,15 @@ int main(void)
         fail();
     }
 
-    sayf(L"created:  %03d.IMG\r\n", n);
+    sayf(L"created:  %s\r\n", fname);
     sayf(L"folder:   %s\r\n", dir);
     sayf(L"size:     %u bytes = %u sectors of %u, no MBR\r\n", IMGSIZE, TOTSEC, BPS);
     sayf(L"layout:   FAT12, media 0x%02X, %u sectors per track, %u heads, "
          L"cluster %u bytes\r\n", MEDIA, SPT, HEADS, CLUSTERSZ);
     sayf(L"inside:   README.TXT, %u bytes, %u cluster(s)\r\n", rdsize, rdclus);
     if (abosize) {
-        char c50[ABOUT_MAX + 1];
-        wchar_t w50[ABOUT_MAX + 1];
-        int k = ABOUT_MAX;
-        memcpy(c50, about, ABOUT_MAX);
-        while (k > 0 && c50[k - 1] == ' ')
-            k--;
-        c50[k] = 0;
-        MultiByteToWideChar(CP_ACP, 0, c50, -1, w50, ABOUT_MAX + 1);
         sayf(L"          ABOUT_ME.TXT, %u bytes\r\n", abosize);
-        sayf(L"comment:  %s\r\n", w50);
+        sayf(L"comment:  %s\r\n", note);
     } else {
         say(L"          no ABOUT_ME.TXT - this image has no comment\r\n");
     }

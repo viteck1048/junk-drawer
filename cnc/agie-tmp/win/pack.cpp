@@ -21,7 +21,7 @@
 // Дата й час запису каталогу беруться з самого файлу, а не з годинника.
 //
 // Увесь текст на екрані — англійською; базові запити й пояснення
-// продубльовані болгарською латинкою.
+// продубльовані болгарською кирилицею (консоль примусово в cp1251).
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o PACK.EXE pack.cpp
 
@@ -161,7 +161,7 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
             menu_status(m, 1, A_PLAIN,
                         L"   R = replace it with the file on disk    C = cancel");
             menu_status(m, 2, A_PLAIN,
-                        L"   R = zameni go s faila ot diska          C = otkazvane");
+                        L"   R = замени го с файла от диска          C = отказване");
             c = ask_status(L"RC");
             menu_status_clear(m);
             if (c != L'R') {
@@ -187,7 +187,7 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
         menu_status(m, 1, A_PLAIN,
                     L"   Use another image, or delete something from this one first.");
         menu_status(m, 2, A_PLAIN,
-                    L"   Izberi drug obraz ili iztrii neshto ot tozi.");
+                    L"   Избери друг образ или изтрий нещо от този.");
         return 0;
     }
     if (slot < 0) {
@@ -281,7 +281,7 @@ int main(void)
     int  n, nf;
     const wchar_t *err;
 
-    SetConsoleOutputCP(CP_UTF8);
+    con_cp1251();
     con_init();
 
     if (!exe_dir(dir, MAX_PATH)) {
@@ -298,8 +298,8 @@ int main(void)
         say(L"PACK - put files into an AGIE floppy image\r\n\r\n"
             L"There is no .IMG file next to this program.\r\n"
             L"PACK never creates an image - NEWIMG.EXE does that.\r\n\r\n"
-            L"Nyama nito edin .IMG do tazi programa.\r\n"
-            L"Napravi nov obraz s NEWIMG.EXE.\r\n");
+            L"Няма нито един .IMG до тази програма.\r\n"
+            L"Направи нов образ с NEWIMG.EXE.\r\n");
         sayf(L"\r\nFolder: %s\r\n", dir);
         wait_key();
         con_done();
@@ -310,10 +310,14 @@ int main(void)
     mi.it  = images;
     mi.n   = n;
     mi.t1  = L"PACK - choose the image you want to put files into";
-    mi.t2  = L"Izberi obraza, v koito shte slagash failove.";
-    mi.h1  = L"  Arrows / PgUp / PgDn = move    Enter = choose    Esc = quit";
-    mi.h2  = L"  Strelki = dvizhenie    Enter = izberi    Esc = izhod";
-    mi.btn = L"[  Quit  /  Izhod  ]";
+    mi.t2  = L"Избери образа, в който ще слагаш файлове.";
+    mi.h1  = L"  Arrows = move   Right/Left = open/close the comment   "
+             L"Enter = choose   Esc = quit";
+    mi.h2  = L"  Стрелки = движение   Дясно/Ляво = целия коментар   "
+             L"Enter = избери   Esc = изход";
+    mi.btn = L"[  Quit  /  Изход  ]";
+    mi.infow    = 16;      /* тільки дата: розмір в усіх образів однаковий */
+    mi.showdone = 0;
 
     cursor_off();
     for (;;) {
@@ -362,7 +366,7 @@ int main(void)
         cursor_on();
         cls();
         sayf(L"No file next to this program can go into %s.\r\n"
-             L"Nyama podhodyasht fail do tazi programa.\r\n\r\n"
+             L"Няма подходящ файл до тази програма.\r\n\r\n"
              L"A file is taken only if its name fits the DOS 8.3 rules and it is\r\n"
              L"not bigger than 360 KB.\r\n", images[mi.sel].name);
         print_name_rules();
@@ -374,11 +378,11 @@ int main(void)
     }
 
     _snwprintf(t1, 159, L"PACK - Enter puts the file into %s", images[mi.sel].name);
-    _snwprintf(t2, 159, L"Enter zapisva faila v %s. Sivite sa veche dobaveni.",
+    _snwprintf(t2, 159, L"Enter записва файла в %s. Сивите са вече добавени.",
                images[mi.sel].name);
     _snwprintf(h1, 159, L"  Arrows = move    Enter = put into the image    "
                         L"Esc = finish");
-    _snwprintf(h2, 159, L"  Strelki = dvizhenie    Enter = zapishi    Esc = krai");
+    _snwprintf(h2, 159, L"  Стрелки = движение    Enter = запиши    Esc = край");
 
     memset(&mf, 0, sizeof(mf));
     mf.it  = files;
@@ -387,7 +391,9 @@ int main(void)
     mf.t2  = t2;
     mf.h1  = h1;
     mf.h2  = h2;
-    mf.btn = L"[  Finish  /  Gotovo  ]";
+    mf.btn = L"[  Finish  /  Готово  ]";
+    mf.infow    = 31;      /* розмір і дата: у файлів вони різні й потрібні */
+    mf.showdone = 1;
 
     menu_draw(&mf);
     show_space(&mf, &v, 0);
@@ -406,7 +412,7 @@ int main(void)
     vol_close(&v);
     cursor_on();
     cls();
-    say(L"Done.  Gotovo.\r\n");
+    say(L"Done.  Готово.\r\n");
     con_done();
     return 0;
 }

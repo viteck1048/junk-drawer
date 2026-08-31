@@ -6,6 +6,12 @@
 // далі: екран не чиститься, кожен кадр просто дописується, а клавіші
 // читаються словами з рядка — DOWN, UP, ENTER, ESC. Це дає змогуганяти
 // програму скриптом, не втрачаючи живого інтерфейсу для оператора.
+// Стрілки праворуч/ліворуч у тому ж перенаправленому вводі — RIGHT і LEFT.
+//
+// Пункт списку заввишки один рядок, поки його коментар згорнутий. Стрілка
+// праворуч розгортає коментар на всі його рядки (по 50 знаків, слова цілі),
+// стрілка ліворуч згортає назад. У згорнутому вигляді останні три значущі
+// знаки першого рядка — крапки, якщо там є що показувати далі.
 //
 // Кольори рядка списку:
 //   звичайний        0x07  світло-сірий на чорному
@@ -18,8 +24,8 @@
 
 #include "imgtool.h"
 
-enum { K_NONE = 0, K_UP, K_DOWN, K_PGUP, K_PGDN, K_HOME, K_END,
-       K_ENTER, K_ESC, K_CHAR };
+enum { K_NONE = 0, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_PGUP, K_PGDN, K_HOME,
+       K_END, K_ENTER, K_ESC, K_CHAR };
 
 enum { MENU_NONE = 0, MENU_PICK, MENU_QUIT };
 
@@ -238,6 +244,8 @@ static int key_from_line(wchar_t *ch)
     a[i] = 0;
     if (!_stricmp(a, "UP"))    return K_UP;
     if (!_stricmp(a, "DOWN"))  return K_DOWN;
+    if (!_stricmp(a, "LEFT"))  return K_LEFT;
+    if (!_stricmp(a, "RIGHT")) return K_RIGHT;
     if (!_stricmp(a, "PGUP"))  return K_PGUP;
     if (!_stricmp(a, "PGDN"))  return K_PGDN;
     if (!_stricmp(a, "HOME"))  return K_HOME;
@@ -263,6 +271,8 @@ static int get_key(wchar_t *ch)
         switch (r.Event.KeyEvent.wVirtualKeyCode) {
         case VK_UP:     return K_UP;
         case VK_DOWN:   return K_DOWN;
+        case VK_LEFT:   return K_LEFT;
+        case VK_RIGHT:  return K_RIGHT;
         case VK_PRIOR:  return K_PGUP;
         case VK_NEXT:   return K_PGDN;
         case VK_HOME:   return K_HOME;
@@ -281,26 +291,32 @@ static int get_key(wchar_t *ch)
 /* «натисни будь-яку клавішу», але без рядкового вводу */
 static void wait_key(void)
 {
-    say(L"\r\nPress any key.  Natisni koi da e klavish.\r\n");
+    say(L"\r\nPress any key.  Натисни кой да е клавиш.\r\n");
     get_key(NULL);
 }
 
 /* ---- список ------------------------------------------------------------- */
 
+#define NAMEW 16               /* стільки знакомісць під ім'я образу/файлу */
+
 typedef struct {
     wchar_t name[96];      /* справжнє ім'я файлу на диску */
     wchar_t disp[96];      /* як показувати (у pack — великими літерами) */
     wchar_t info[48];
-    wchar_t note[64];      /* коментар з ABOUT_ME.TXT; у списку файлів порожній */
+    wchar_t nline[NOTE_MAXL][NOTE_W + 1];  /* коментар, уже розкладений по рядках */
+    int     nlines;        /* скільки їх; 0 = коментаря немає */
+    int     open;          /* коментар розгорнутий на всі рядки */
     int     done;          /* уже записаний в образ -> сірим */
 } MItem;
 
 typedef struct {
     MItem *it;
     int    n;
-    int    sel, top, rows;
-    int    y0;             /* перший рядок списку */
+    int    sel, topline, rows;   /* topline — рядок, а не пункт: пункти різні */
+    int    y0;                   /* перший рядок списку */
     int    ybtn, yhint, ystat;
+    int    infow;                /* ширина колонки з датою (і розміром) */
+    int    showdone;             /* чи є взагалі колонка «added» */
     const wchar_t *t1, *t2;
     const wchar_t *h1, *h2;
     const wchar_t *btn;
@@ -308,54 +324,166 @@ typedef struct {
 
 #define STATLINES 4
 
+/* скільки рядків займає пункт: розгорнутий коментар — усі свої */
+static int item_h(const Menu *m, int k)
+{
+    const MItem *e = &m->it[k];
+    return (e->open && e->nlines > 1) ? e->nlines : 1;
+}
+
+/* абсолютний номер рядка, з якого починається пункт k */
+static int item_line(const Menu *m, int k)
+{
+    int i, ln = 0;
+    for (i = 0; i < k && i < m->n; i++)
+        ln += item_h(m, i);
+    return ln;
+}
+
+static int total_lines(const Menu *m) { return item_line(m, m->n); }
+
+/* пункт, якому належить рядок ln */
+static int item_at(const Menu *m, int ln)
+{
+    int i, y = 0;
+    for (i = 0; i < m->n; i++) {
+        y += item_h(m, i);
+        if (ln < y)
+            return i;
+    }
+    return m->n ? m->n - 1 : 0;
+}
+
+/* ім'я в NAMEW знакомісць; довше — тильда на останньому */
+static void name_cut(const wchar_t *s, wchar_t *out)
+{
+    size_t len = wcslen(s);
+    if (len <= NAMEW) {
+        wcscpy(out, s);
+        return;
+    }
+    wcsncpy(out, s, NAMEW - 1);
+    out[NAMEW - 1] = L'~';
+    out[NAMEW] = 0;
+}
+
+/* Перший рядок коментаря для згорнутого пункту. Якщо далі є ще рядки,
+   останні три значущі знаки заміняємо крапками — той самий знак обірваності,
+   що й тильда в задовгому імені. */
+static void note_head(const MItem *e, wchar_t *out)
+{
+    int len;
+    out[0] = 0;
+    if (e->nlines == 0)
+        return;
+    wcscpy(out, e->nline[0]);
+    if (e->nlines == 1)
+        return;
+    len = (int)wcslen(out);
+    if (len <= 3) {
+        wcscpy(out, L"...");
+        return;
+    }
+    out[len - 3] = L'.';
+    out[len - 2] = L'.';
+    out[len - 1] = L'.';
+}
+
 static void menu_layout(Menu *m)
 {
+    int tot, avail;
     con_size();
-    m->y0   = 3;
-    m->rows = win_h - (m->y0 + 1 + 1 + 1 + 2 + 1 + STATLINES);
-    if (m->rows > m->n) m->rows = m->n;
-    if (m->rows < 1)    m->rows = 1;
+    m->y0 = 3;
+    avail = win_h - (m->y0 + 1 + 1 + 1 + 2 + 1 + STATLINES);
+    if (avail < 1)
+        avail = 1;
+    tot = total_lines(m);
+    m->rows = (tot < avail) ? tot : avail;
+    if (m->rows < 1)
+        m->rows = 1;
     m->ybtn  = m->y0 + m->rows + 1;
     m->yhint = m->ybtn + 2;
     m->ystat = m->yhint + 3;
-    if (m->sel < 0) m->sel = 0;
-    if (m->sel > m->n) m->sel = m->n;
-    if (m->sel >= m->n) {
-        m->top = m->n - m->rows;      /* на софт-кнопці показуємо хвіст списку */
-    } else {
-        if (m->top > m->sel)
-            m->top = m->sel;
-        if (m->sel >= m->top + m->rows)
-            m->top = m->sel - m->rows + 1;
+    if (m->sel < 0)     m->sel = 0;
+    if (m->sel > m->n)  m->sel = m->n;
+    if (m->topline > tot - m->rows) m->topline = tot - m->rows;
+    if (m->topline < 0) m->topline = 0;
+}
+
+/* Підкрутити видиме поле під вибраний пункт. Крутимо східцями по три рядки:
+   курсор стрибає по образах, як і раніше, а список під ним іде рівними
+   кроками, а не смикається щоразу, коли попереду чийсь розгорнутий
+   коментар. У розгорнутого пункту намагаємось показати всі його рядки. */
+#define SCROLL_STEP 3
+
+static void menu_show_sel(Menu *m)
+{
+    int ln, h, want, need;
+
+    if (m->sel >= m->n)          /* софт-кнопка стоїть на своєму місці завжди */
+        return;
+    ln = item_line(m, m->sel);
+    h  = item_h(m, m->sel);
+    if (h > m->rows)
+        h = m->rows;
+    if (ln < m->topline) {
+        need = m->topline - ln;
+        m->topline -= ((need + SCROLL_STEP - 1) / SCROLL_STEP) * SCROLL_STEP;
+        if (m->topline < 0)
+            m->topline = 0;
     }
-    if (m->top > m->n - m->rows) m->top = m->n - m->rows;
-    if (m->top < 0) m->top = 0;
+    want = ln + h - 1;
+    if (want > m->topline + m->rows - 1) {
+        need = want - (m->topline + m->rows - 1);
+        m->topline += ((need + SCROLL_STEP - 1) / SCROLL_STEP) * SCROLL_STEP;
+    }
 }
 
 static void menu_draw_items(Menu *m)
 {
-    int i;
-    for (i = 0; i < m->rows; i++) {
-        int k = m->top + i;
-        if (k < m->n) {
-            MItem *e = &m->it[k];
-            WORD a = (k == m->sel) ? (e->done ? A_SELDONE : A_SEL)
-                                   : (e->done ? A_DONE    : A_PLAIN);
-            putlinef(m->y0 + i, a, L" %s %-13s %-31s %-6s %s",
-                     (k == m->sel) ? L">" : L" ",
-                     e->disp, e->info, e->done ? L"added" : L"", e->note);
-        } else {
-            putline(m->y0 + i, A_PLAIN, L"");
+    wchar_t nm[NAMEW + 2], nt[NOTE_W + 4];
+    const wchar_t *gap = m->showdone ? L"       " : L"";
+    int k, j, ln = 0, y = 0;
+
+    for (k = 0; k < m->n && y < m->rows; k++) {
+        MItem *e = &m->it[k];
+        int h = item_h(m, k);
+        WORD a = (k == m->sel) ? (e->done ? A_SELDONE : A_SEL)
+                               : (e->done ? A_DONE    : A_PLAIN);
+        for (j = 0; j < h; j++, ln++) {
+            if (ln < m->topline)
+                continue;
+            if (y >= m->rows)
+                break;
+            if (j == 0) {
+                name_cut(e->disp, nm);
+                if (h == 1)
+                    note_head(e, nt);
+                else
+                    wcscpy(nt, e->nline[0]);
+                putlinef(m->y0 + y, a, L" %s %-*s %-*s %s%s",
+                         (k == m->sel) ? L">" : L" ",
+                         NAMEW, nm, m->infow, e->info,
+                         (m->showdone && e->done) ? L"added  " : gap, nt);
+            } else {
+                putlinef(m->y0 + y, a, L"   %-*s %-*s %s%s",
+                         NAMEW, L"", m->infow, L"", gap, e->nline[j]);
+            }
+            y++;
         }
+    }
+    while (y < m->rows) {
+        putline(m->y0 + y, A_PLAIN, L"");
+        y++;
     }
     putlinef(m->ybtn, (m->sel == m->n) ? A_SEL : A_PLAIN,
              L" %s %s", (m->sel == m->n) ? L">" : L" ", m->btn);
 }
 
-static void menu_draw(Menu *m)
+/* усе, крім статусної області */
+static void menu_paint(Menu *m)
 {
     menu_layout(m);
-    cls();
     putlinef(0, A_TITLE, L"%s   [ %d / %d ]",
              m->t1, (m->sel < m->n) ? m->sel + 1 : m->n, m->n);
     putline(1, A_TITLE, m->t2);
@@ -366,6 +494,13 @@ static void menu_draw(Menu *m)
     putline(m->yhint + 1, A_HINT, m->h2);
 }
 
+static void menu_draw(Menu *m)
+{
+    menu_layout(m);
+    cls();
+    menu_paint(m);
+}
+
 /* заголовок містить лічильник, тому при русі перемальовуємо і його */
 static void menu_refresh(Menu *m)
 {
@@ -373,6 +508,20 @@ static void menu_refresh(Menu *m)
     putlinef(0, A_TITLE, L"%s   [ %d / %d ]",
              m->t1, (m->sel < m->n) ? m->sel + 1 : m->n, m->n);
     menu_draw_items(m);
+}
+
+/* Розгортання/згортання коментаря змінює висоту списку, а з нею й місце
+   софт-кнопки, підказок і статусної області. Коли блок виріс, нове малювання
+   само накриває старе; коли вкоротився — під ним лишився б хвіст, тому там
+   чистимо екран. */
+static void menu_relayout(Menu *m, int oldbtn)
+{
+    menu_layout(m);
+    menu_show_sel(m);
+    if (m->ybtn < oldbtn)
+        menu_draw(m);
+    else
+        menu_paint(m);
 }
 
 static void menu_status_clear(Menu *m)
@@ -398,17 +547,74 @@ static void menu_status(Menu *m, int line, WORD a, const wchar_t *fmt, ...)
 static int menu_key(Menu *m)
 {
     int k = get_key(NULL);
-    int last = m->n;                  /* n == софт-кнопка */
+    int last = m->n;
+    int oldbtn, tot;
+
+    menu_layout(m);
+    oldbtn = m->ybtn;
+    tot = total_lines(m);
+
     switch (k) {
-    case K_UP:    if (m->sel > 0)    m->sel--;               break;
-    case K_DOWN:  if (m->sel < last) m->sel++;               break;
-    case K_PGUP:  m->sel -= m->rows; if (m->sel < 0) m->sel = 0;        break;
-    case K_PGDN:  m->sel += m->rows; if (m->sel > last) m->sel = last;  break;
-    case K_HOME:  m->sel = 0;                                break;
-    case K_END:   m->sel = last;                             break;
-    case K_ESC:   return MENU_QUIT;
-    case K_ENTER: return (m->sel == last) ? MENU_QUIT : MENU_PICK;
-    default:      return MENU_NONE;
+    case K_UP:
+        if (m->sel > 0) {
+            m->sel--;
+            menu_show_sel(m);
+        }
+        break;
+    case K_DOWN:
+        if (m->sel < last) {
+            m->sel++;
+            menu_show_sel(m);
+        }
+        break;
+    case K_RIGHT:
+        if (m->sel < m->n && m->it[m->sel].nlines > 1 && !m->it[m->sel].open) {
+            m->it[m->sel].open = 1;
+            menu_relayout(m, oldbtn);
+            return MENU_NONE;
+        }
+        break;
+    case K_LEFT:
+        if (m->sel < m->n && m->it[m->sel].open) {
+            m->it[m->sel].open = 0;
+            menu_relayout(m, oldbtn);
+            return MENU_NONE;
+        }
+        break;
+    case K_PGUP:
+        if (tot <= m->rows) {
+            m->sel = 0;
+        } else {
+            m->topline -= m->rows;
+            if (m->topline < 0)
+                m->topline = 0;
+            m->sel = item_at(m, m->topline);
+        }
+        break;
+    case K_PGDN:
+        if (tot <= m->rows) {
+            m->sel = last;
+        } else {
+            m->topline += m->rows;
+            if (m->topline > tot - m->rows)
+                m->topline = tot - m->rows;
+            m->sel = item_at(m, m->topline);
+        }
+        break;
+    case K_HOME:
+        m->sel = 0;
+        m->topline = 0;
+        break;
+    case K_END:
+        m->sel = last;
+        m->topline = (tot > m->rows) ? tot - m->rows : 0;
+        break;
+    case K_ESC:
+        return MENU_QUIT;
+    case K_ENTER:
+        return (m->sel == last) ? MENU_QUIT : MENU_PICK;
+    default:
+        return MENU_NONE;
     }
     menu_refresh(m);
     return MENU_NONE;
@@ -427,6 +633,20 @@ static void stamp_info(const FILETIME *ft, DWORD size, wchar_t *out, size_t cap)
                    st.wHour, st.wMinute);
     else
         _snwprintf(out, cap - 1, L"%7lu bytes", (unsigned long)size);
+    out[cap - 1] = 0;
+}
+
+/* Для образів розміру в списку немає: він однаковий у всіх (720 КБ) і в
+   колонці був би самим лише шумом. Лишається час останнього запису. */
+static void stamp_date(const FILETIME *ft, wchar_t *out, size_t cap)
+{
+    SYSTEMTIME st;
+    FILETIME lft;
+    if (FileTimeToLocalFileTime(ft, &lft) && FileTimeToSystemTime(&lft, &st))
+        _snwprintf(out, cap - 1, L"%04u-%02u-%02u %02u:%02u",
+                   st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+    else
+        out[0] = 0;
     out[cap - 1] = 0;
 }
 
@@ -464,14 +684,16 @@ static int collect_images(const wchar_t *dir, MItem *it, int max)
             break;
         wcscpy(it[n].name, fd.cFileName);
         wcscpy(it[n].disp, fd.cFileName);
-        stamp_info(&fd.ftLastWriteTime, fd.nFileSizeLow, it[n].info, 48);
+        stamp_date(&fd.ftLastWriteTime, it[n].info, 48);
         {   /* коментар з ABOUT_ME.TXT; немає файлу — колонка лишається порожня */
             wchar_t full[MAX_PATH];
+            static wchar_t note[NOTE_MAX + 1];
             _snwprintf(full, MAX_PATH - 1, L"%s\\%s", dir, fd.cFileName);
             full[MAX_PATH - 1] = 0;
-            if (!read_about(full, it[n].note, 64))
-                it[n].note[0] = 0;
+            it[n].nlines = read_about(full, note, NOTE_MAX + 1)
+                         ? wrap_note(note, it[n].nline, NOTE_MAXL) : 0;
         }
+        it[n].open = 0;
         it[n].done = 0;
         n++;
     } while (FindNextFileW(h, &fd));
@@ -521,7 +743,8 @@ static int collect_files(const wchar_t *dir, MItem *it, int max, DWORD maxsize)
         wcscpy(it[n].name, fd.cFileName);
         wcscpy(it[n].disp, up);
         stamp_info(&fd.ftLastWriteTime, fd.nFileSizeLow, it[n].info, 48);
-        it[n].note[0] = 0;
+        it[n].nlines = 0;
+        it[n].open = 0;
         it[n].done = 0;
         n++;
     } while (FindNextFileW(h, &fd));

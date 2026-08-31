@@ -13,7 +13,7 @@
 // програму справді писали.
 //
 // Увесь текст на екрані — англійською; базові запити й пояснення
-// продубльовані болгарською латинкою.
+// продубльовані болгарською кирилицею (консоль примусово в cp1251).
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o UNPACK.EXE unpack.cpp
 
@@ -135,7 +135,7 @@ static int do_unpack(const wchar_t *dir, const wchar_t *imgname)
 
     if (count == 0) {
         say(L"   The image contains no files.\r\n"
-            L"   Obrazat e prazen.\r\n");
+            L"   Образът е празен.\r\n");
         vol_close(&v);
         wait_key();
         return 0;
@@ -152,9 +152,9 @@ static int do_unpack(const wchar_t *dir, const wchar_t *imgname)
         say(L"   O = extract into it, overwriting files with the same names\r\n"
             L"   N = extract into a new folder next to it\r\n"
             L"   C = cancel, back to the list\r\n"
-            L"   O = razopakovai vatre, presapisvai saeshtite imena\r\n"
-            L"   N = nova papka do neya\r\n"
-            L"   C = otkazvane, obratno kam spisaka\r\n");
+            L"   O = разопаковай вътре, презаписвай същите имена\r\n"
+            L"   N = нова папка до нея\r\n"
+            L"   C = отказване, обратно към списъка\r\n");
         for (;;) {
             wchar_t ch = 0;
             int k = get_key(&ch);
@@ -228,7 +228,7 @@ int main(void)
     Menu m;
     int n;
 
-    SetConsoleOutputCP(CP_UTF8);
+    con_cp1251();
     con_init();
 
     if (!exe_dir(dir, MAX_PATH)) {
@@ -244,8 +244,8 @@ int main(void)
         say(L"UNPACK - extract the files out of an AGIE floppy image\r\n\r\n"
             L"There is no .IMG file next to this program.\r\n"
             L"Copy an image here, or make one with NEWIMG.EXE, and start again.\r\n\r\n"
-            L"Nyama nito edin .IMG do tazi programa.\r\n"
-            L"Kopirai obraz tuk ili napravi nov s NEWIMG.EXE.\r\n");
+            L"Няма нито един .IMG до тази програма.\r\n"
+            L"Копирай образ тук или направи нов с NEWIMG.EXE.\r\n");
         sayf(L"\r\nFolder: %s\r\n", dir);
         wait_key();
         con_done();
@@ -256,10 +256,14 @@ int main(void)
     m.it  = images;
     m.n   = n;
     m.t1  = L"UNPACK - choose an image and press Enter to extract it";
-    m.t2  = L"Izberi obraz sas strelkite i natisni Enter.";
-    m.h1  = L"  Arrows / PgUp / PgDn = move    Enter = unpack    Esc = quit";
-    m.h2  = L"  Strelki = dvizhenie    Enter = razopakovai    Esc = izhod";
-    m.btn = L"[  Quit  /  Izhod  ]";
+    m.t2  = L"Избери образ със стрелките и натисни Enter.";
+    m.h1  = L"  Arrows = move   Right/Left = open/close the comment   "
+            L"Enter = unpack   Esc = quit";
+    m.h2  = L"  Стрелки = движение   Дясно/Ляво = целия коментар   "
+            L"Enter = разопаковай   Esc = изход";
+    m.btn = L"[  Quit  /  Изход  ]";
+    m.infow    = 16;      /* тільки дата: розмір в усіх образів однаковий */
+    m.showdone = 0;
 
     cursor_off();
     for (;;) {

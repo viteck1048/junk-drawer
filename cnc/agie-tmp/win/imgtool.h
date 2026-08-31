@@ -8,7 +8,9 @@
 // беруть і наш 720 КБ (737280 Б), і звичайні 1,44 МБ, якщо колись знадобиться.
 //
 // Увесь текст, що бачить оператор, — англійською; базові запити й правила
-// імен продубльовані болгарською латинкою. Коментарі — українською.
+// імен продубльовані болгарською кирилицею. Коментарі — українською.
+//
+// Кодування — cp1251: у ньому й консоль, і коментар усередині образу.
 
 #ifndef IMGTOOL_H
 #define IMGTOOL_H
@@ -31,16 +33,16 @@ static void say(const wchar_t *s)
         return;
     if (WriteConsoleW(h, s, (DWORD)wcslen(s), &n, NULL))
         return;
-    /* вивід перенаправлено у файл — консольного API там немає, йдемо в UTF-8 */
+    /* вивід перенаправлено у файл — консольного API там немає, йдемо в cp1251 */
     {
-        int need = WideCharToMultiByte(CP_UTF8, 0, s, -1, NULL, 0, NULL, NULL);
+        int need = WideCharToMultiByte(1251, 0, s, -1, NULL, 0, NULL, NULL);
         char *a;
         if (need <= 1)
             return;
         a = (char *)malloc((size_t)need);
         if (!a)
             return;
-        WideCharToMultiByte(CP_UTF8, 0, s, -1, a, need, NULL, NULL);
+        WideCharToMultiByte(1251, 0, s, -1, a, need, NULL, NULL);
         WriteFile(h, a, (DWORD)(need - 1), &n, NULL);
         free(a);
     }
@@ -55,6 +57,16 @@ static void sayf(const wchar_t *fmt, ...)
     buf[2047] = 0;
     va_end(ap);
     say(buf);
+}
+
+/* Консоль примусово в cp1251. Самі рядки ми пишемо WriteConsoleW, тобто
+   широкими знаками, і кодова сторінка на них не впливає; вона потрібна для
+   вводу, для перенаправленого виводу і для того, щоб консоль узяла шрифт,
+   у якому кирилиця взагалі є. Те саме кодування лежить і в ABOUT_ME.TXT. */
+static void con_cp1251(void)
+{
+    SetConsoleOutputCP(1251);
+    SetConsoleCP(1251);
 }
 
 /* пауза потрібна тільки там, звідки програма більше нічого не питатиме:
@@ -309,7 +321,7 @@ static void raw_to_name(const char *raw, wchar_t *out)
             n[k++] = raw[e];
     }
     n[k] = 0;
-    MultiByteToWideChar(CP_ACP, 0, n, -1, out, 16);
+    MultiByteToWideChar(1251, 0, n, -1, out, 16);
 }
 
 /* 1 = це справжній файл; 0 = порожньо, стерто, мітка, тека або уламок LFN */
@@ -363,11 +375,11 @@ static void print_name_rules(void)
         L"     lower case is accepted but stored in capitals;\r\n"
         L"     no spaces, no Cyrillic, no long names.\r\n"
         L"     Examples: 1234.NC   PROG.JOB   1148-2.NC   TE45.GEO\r\n"
-        L"   Pravila za imenata vatre v obraza:\r\n"
-        L"     do 8 znaka, tochka, do 3 znaka;\r\n"
-        L"     samo glavni bukvi A-Z, tsifri 0-9 i - _ ;\r\n"
-        L"     malkite bukvi se priemat i stavat glavni;\r\n"
-        L"     bez interval, bez kirilitsa, bez dalgi imena.\r\n");
+        L"   Правила за имената вътре в образа:\r\n"
+        L"     до 8 знака, точка, до 3 знака;\r\n"
+        L"     само главни букви A-Z, цифри 0-9 и - _ ;\r\n"
+        L"     малките букви се приемат и стават главни;\r\n"
+        L"     без интервал, без кирилица, без дълги имена.\r\n");
 }
 
 /* Ім'я файлу-кандидата: суворо 8.3, великі літери. NULL = гаразд. */
@@ -419,15 +431,25 @@ static void name_to_raw(const wchar_t *s, char *raw)
 
 /* ===================== коментар образу ================================== */
 
-/* ABOUT_ME.TXT: перші 50 байтів — коментар до образу, доповнений пробілами,
-   далі CRLF і пояснення, що файл видаляти не варто. Створює його NEWIMG.EXE.
+/* ABOUT_ME.TXT: перший рядок — коментар до образу, за ним CRLF, далі
+   пояснення, що файл видаляти не варто. Створює його NEWIMG.EXE.
+
+   Коментар більше не доповнюється пробілами до 50 знаків і більше не
+   обмежений ними: кінець коментаря — CRLF, довжина будь-яка до NOTE_MAX.
+   Байти — cp1251, тобто латинка і кирилиця однаково. Старі образи (рівно
+   50 знаків, доповнені пробілами, і той самий CRLF) читаються тим самим
+   кодом: хвостові пробіли обрізаються й від них нічого не лишається.
+
    Файлу може не бути — це не помилка, просто коментаря немає.
 
    Читаємо НЕ через vol_open: список образів на флешці буває довгим, і тягти
    по 737 КБ на кожен рядок меню — це видима пауза при старті. Тут вистачає
    boot-сектора, кореня і одного кластера, тобто десь 8 КБ на образ. */
 
-#define ABOUT_MAX 50
+#define NOTE_W    50     /* ширина колонки коментаря, по ній же й переносимо */
+#define NOTE_MAXL 12     /* стільки рядків максимум лишається від коментаря */
+#define NOTE_MAX  500    /* стільки знаків максимум у самому коментарі */
+
 static const char ABOUT_RAW[12] = "ABOUT_METXT";
 
 static int read_at(HANDLE f, DWORD off, void *buf, DWORD len)
@@ -439,18 +461,20 @@ static int read_at(HANDLE f, DWORD off, void *buf, DWORD len)
     return ReadFile(f, buf, len, &got, NULL) && got == len;
 }
 
+/* Коментар образу в out[] (широкими знаками). 0 = коментаря немає.
+   cap має бути не менше за NOTE_MAX + 1. */
 static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
 {
     static unsigned char root[512 * 32];
-    unsigned char bs[512], data[ABOUT_MAX];
-    char text[ABOUT_MAX + 1];
+    unsigned char bs[512], data[NOTE_MAX + 2];
+    char text[NOTE_MAX + 1];
     HANDLE f;
-    unsigned bps, spc, res, nfat, rootent, spf, rootsec, datasec;
+    unsigned bps, spc, res, nfat, rootent, spf, rootsec, datasec, clustersz;
     unsigned clus = 0, size = 0, want;
     int i, n;
 
     out[0] = 0;
-    if (cap < ABOUT_MAX + 1)
+    if (cap < NOTE_MAX + 1)
         return 0;
 
     f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
@@ -470,8 +494,9 @@ static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
         CloseHandle(f);
         return 0;
     }
-    rootsec = res + nfat * spf;
-    datasec = rootsec + rootent * 32 / bps;
+    rootsec   = res + nfat * spf;
+    datasec   = rootsec + rootent * 32 / bps;
+    clustersz = spc * bps;
 
     if (!read_at(f, rootsec * bps, root, rootent * 32)) { CloseHandle(f); return 0; }
 
@@ -489,16 +514,19 @@ static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
     }
     if (clus < 2 || size == 0) { CloseHandle(f); return 0; }
 
-    want = (size < ABOUT_MAX) ? size : ABOUT_MAX;
+    /* перший рядок цілком лежить у першому кластері: NOTE_MAX + CRLF < 1 КБ */
+    want = NOTE_MAX + 2;
+    if (want > size)      want = size;
+    if (want > clustersz) want = clustersz;
     if (!read_at(f, (datasec + (clus - 2) * spc) * bps, data, want)) {
         CloseHandle(f);
         return 0;
     }
     CloseHandle(f);
 
-    /* тільки друковані ASCII, до першого керівного знака */
-    for (n = 0; n < (int)want; n++) {
-        if (data[n] < 32 || data[n] > 126)
+    /* до CRLF (та й до будь-якого керівного знака), далі — не наша справа */
+    for (n = 0; n < (int)want && n < NOTE_MAX; n++) {
+        if (data[n] < 32 || data[n] == 127)
             break;
         text[n] = (char)data[n];
     }
@@ -507,8 +535,41 @@ static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
     text[n] = 0;
     if (n == 0)
         return 0;
-    MultiByteToWideChar(CP_ACP, 0, text, -1, out, (int)cap);
+    MultiByteToWideChar(1251, 0, text, -1, out, (int)cap);
     return 1;
+}
+
+/* Розкласти коментар на рядки не довші за NOTE_W, переносячи слова цілком.
+   Слово, довше за цілий рядок, ріжеться силоміць — інакше його нікуди дінеш.
+   Повертає скільки рядків вийшло, не більше за maxl. */
+static int wrap_note(const wchar_t *s, wchar_t lines[][NOTE_W + 1], int maxl)
+{
+    int nl = 0;
+    while (*s && nl < maxl) {
+        size_t len, cut, i;
+        while (*s == L' ')
+            s++;
+        if (!*s)
+            break;
+        len = wcslen(s);
+        if (len <= NOTE_W) {
+            cut = len;
+        } else {
+            cut = 0;
+            for (i = NOTE_W; i > 0; i--)          /* назад до найближчого пробілу */
+                if (s[i] == L' ') { cut = i; break; }
+            if (cut == 0)
+                cut = NOTE_W;                     /* суцільне слово — ріжемо */
+        }
+        wcsncpy(lines[nl], s, cut);
+        lines[nl][cut] = 0;
+        while (cut > 0 && lines[nl][cut - 1] == L' ')
+            lines[nl][--cut] = 0;
+        if (cut > 0)
+            nl++;
+        s += (cut == 0) ? 1 : cut;
+    }
+    return nl;
 }
 
 #endif /* IMGTOOL_H */
