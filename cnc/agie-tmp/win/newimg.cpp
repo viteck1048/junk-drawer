@@ -21,9 +21,10 @@
 // Питає рівно два: як назвати образ (можна нічого) і короткий коментар
 // до нього (теж можна нічого). Коментар лягає першим рядком ABOUT_ME.TXT
 // і закінчується CRLF; PACK.EXE та UNPACK.EXE показують його в своїх
-// списках. Кодування — cp866 (DOS-кирилиця), тобто латинка й кирилиця
-// однаково. У ньому ж консоль і рядки в самому exe: усе однобайтове, усі
-// виклики WinAPI — з явним суфіксом A, ніяких широких знаків.
+// списках. Тільки друкований ASCII — і в імені, і в коментарі: кодову
+// сторінку консолі кожна цехова машина піднімає свою (866, 437, 1251),
+// і єдине, що в них усіх однакове, — латинка. Кодових сторінок програма
+// не чіпає. Усе однобайтове, виклики WinAPI — з явним суфіксом A.
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o NEWIMG.EXE newimg.cpp
 
@@ -103,12 +104,10 @@ static const char README[] =
 "comment shows its first line only, ending in three dots; the right\r\n"
 "arrow key opens it in full, the left arrow folds it back.\r\n"
 "To change the comment, edit the first line; nothing has to be padded.\r\n"
-"The text is Latin or Cyrillic in the DOS code page 866, the one the\r\n"
-"console itself uses, so edit it with something that understands DOS\r\n"
-"text - the Total Commander viewer (F3, then 2) or Notepad++ with\r\n"
-"OEM 866 - not with Notepad, which will show Cyrillic as nonsense and\r\n"
-"save it back wrong. Deleting the file only leaves that column empty;\r\n"
-"nothing else breaks.\r\n"
+"Latin letters, digits and simple punctuation only - no Cyrillic. Every\r\n"
+"machine in the shop brings its console up in a different code page, so\r\n"
+"Latin is the only text that comes out right on all of them. Deleting\r\n"
+"the file only leaves that column empty; nothing else breaks.\r\n"
 "\r\n"
 "FILE NAMING RULES INSIDE THE IMAGE\r\n"
 "Short DOS names only: up to 8 characters, a dot, up to 3 more.\r\n"
@@ -169,12 +168,11 @@ static const char README[] =
 "si red, koito zavarshva s tri tochki; strelka nadyasno go otvarya\r\n"
 "tsyal, strelka nalyavo go zatvarya obratno.\r\n"
 "Za da smenish komentara, redaktirai parviya red - nishto ne se dopalva\r\n"
-"s intervali. Tekstat e na latinitsa ili kirilitsa v DOS kodovata\r\n"
-"stranitsa 866 - sashtata, koyato polzva i konzolata. Redaktirai go s\r\n"
-"programa, koyato razbira DOS tekst: Total Commander (F3, posle 2) ili\r\n"
-"Notepad++ s OEM 866. Ne s Notepad - toi pokazva kirilitsata kato\r\n"
-"bulgur i ya zapisva greshno. Ako iztriesh faila, kolonata prosto\r\n"
-"ostava prazna - nishto drugo ne se chupi.\r\n"
+"s intervali. Samo latinitsa, tsifri i prosta punktuatsiya - bez\r\n"
+"kirilitsa. Vsyaka mashina v tseha vdiga konzolata si v razlichna\r\n"
+"kodova stranitsa, zatova samo latinskiyat tekst izliza pravilno\r\n"
+"navsyakade. Ako iztriesh faila, kolonata prosto ostava prazna -\r\n"
+"nishto drugo ne se chupi.\r\n"
 "\r\n"
 "PRAVILA ZA IMENATA NA FAILOVETE VATRE V OBRAZA\r\n"
 "Samo kratki DOS imena: do 8 znaka, tochka, oshte do 3 znaka.\r\n"
@@ -192,23 +190,22 @@ static const char README[] =
 static const char ABOUT_BODY[] =
 "Do not delete this file.\r\n"
 "The first line above is the comment for this image: everything up to\r\n"
-"the line break, up to 500 characters, Latin or Cyrillic in the DOS\r\n"
-"code page 866. PACK.EXE and UNPACK.EXE read it and show it next to the\r\n"
-"image in their lists, wrapped into lines of 50 characters. Nothing is\r\n"
-"padded: just edit the first line and keep the rest of the file as it\r\n"
-"is. Use an editor that understands DOS text - Total Commander (F3,\r\n"
-"then 2) or Notepad++ with OEM 866; Notepad shows Cyrillic wrong.\r\n"
-"Without this file the comment column simply stays empty; nothing else\r\n"
-"breaks.\r\n"
+"the line break, up to 500 characters, Latin letters only - no\r\n"
+"Cyrillic, because the machines here do not agree on a code page.\r\n"
+"PACK.EXE and UNPACK.EXE read it and show it next to the image in their\r\n"
+"lists, wrapped into lines of 50 characters. Nothing is padded: just\r\n"
+"edit the first line in any text editor and keep the rest of the file\r\n"
+"as it is. Without this file the comment column simply stays empty;\r\n"
+"nothing else breaks.\r\n"
 "\r\n"
 "Ne iztrivai tozi fail.\r\n"
 "Parviyat red gore e komentarat na tozi obraz: vsichko do kraya na\r\n"
-"reda, do 500 znaka, na latinitsa ili na kirilitsa (DOS kodova\r\n"
-"stranitsa 866). PACK.EXE i UNPACK.EXE go pokazvat v spisaka do imeto\r\n"
-"na obraza, razdelen na redove po 50 znaka. Nishto ne se dopalva s\r\n"
-"intervali - prosto redaktirai parviya red s programa, koyato razbira\r\n"
-"DOS tekst (Total Commander F3-2, Notepad++ s OEM 866). Bez tozi fail\r\n"
-"kolonata s komentara ostava prazna - nishto drugo.\r\n";
+"reda, do 500 znaka, samo na latinitsa - bez kirilitsa, zashtoto\r\n"
+"mashinite tuk ne sa na edna kodova stranitsa. PACK.EXE i UNPACK.EXE go\r\n"
+"pokazvat v spisaka do imeto na obraza, razdelen na redove po 50 znaka.\r\n"
+"Nishto ne se dopalva s intervali - prosto redaktirai parviya red s\r\n"
+"koyto i da e tekstov redaktor. Bez tozi fail kolonata s komentara\r\n"
+"ostava prazna - nishto drugo.\r\n";
 
 // Коментар: без доповнення пробілами, кінець — CRLF, довжина будь-яка до
 // COMMENT_MAX. Стеля потрібна не операторові, а самому файлу: перший рядок
@@ -382,8 +379,8 @@ static int ask_name(char *out, size_t cap, size_t room)
 
         say("\r\nName for this image, after the number. ASCII only.\r\n"
             "Press Enter on an empty line to leave just the number.\r\n"
-            "Име на образа, след номера. Само букви ASCII.\r\n"
-            "Празен ред = само номерът.\r\n> ");
+            "Ime na obraza, sled nomera. Samo latinski bukvi.\r\n"
+            "Prazen red = samo nomerat.\r\n> ");
         if (!read_line(in, 1024) || !in[0])
             return 0;
 
@@ -406,14 +403,14 @@ static int ask_name(char *out, size_t cap, size_t room)
         if (bad) {
             say("!! Latin letters, digits and simple punctuation only;\r\n"
                 "!! none of these:  \\ / : * ? \" < > |\r\n"
-                "!! Само латиница, цифри и проста пунктуация;\r\n"
-                "!! без тези знаци:  \\ / : * ? \" < > |\r\n");
+                "!! Samo latinitsa, tsifri i prosta punktuatsiya;\r\n"
+                "!! bez tezi znatsi:  \\ / : * ? \" < > |\r\n");
             continue;
         }
         if (len > NAME_MAX || len > room) {
             size_t lim = (NAME_MAX < room) ? NAME_MAX : room;
             sayf("!! too long: %u characters, %u fit here\r\n"
-                 "!! твърде дълго: %u знака, тук се побират %u\r\n",
+                 "!! tvarde dalgo: %u znaka, tuk se pobirat %u\r\n",
                  (unsigned)len, (unsigned)lim, (unsigned)len, (unsigned)lim);
             continue;
         }
@@ -422,8 +419,9 @@ static int ask_name(char *out, size_t cap, size_t room)
     }
 }
 
-// Коментар з клавіатури. Довжина будь-яка до COMMENT_MAX, латинка й кирилиця
-// однаково. 0 = оператор пропустив; інакше out[] — сам коментар, без CRLF.
+// Коментар з клавіатури. Довжина будь-яка до COMMENT_MAX, знаки — тільки
+// друкований ASCII. 0 = оператор пропустив; інакше out[] — сам коментар,
+// без CRLF.
 static int ask_comment(char *out, size_t cap)
 {
     char in[1024];
@@ -431,27 +429,27 @@ static int ask_comment(char *out, size_t cap)
         size_t len, i;
         int bad = 0;
 
-        say("\r\nShort comment for this image. Latin or Cyrillic.\r\n"
+        say("\r\nShort comment for this image, Latin letters only.\r\n"
             "Press Enter on an empty line if you do not want one.\r\n"
-            "Кратък коментар за този образ. Латиница или кирилица.\r\n"
-            "Празен ред = без коментар.\r\n> ");
+            "Kratak komentar za tozi obraz, samo latinitsa.\r\n"
+            "Prazen red = bez komentar.\r\n> ");
         if (!read_line(in, 1024) || !in[0])
             return 0;
 
-        /* char знаковий, а кирилиця в cp866 — байти понад 127; без
-           приведення вони б виглядали як керівні знаки й летіли в помилку */
+        /* char знаковий, тому байт понад 127 без приведення виглядав би
+           відʼємним і проскочив би повз перевірку */
         len = strlen(in);
         for (i = 0; i < len; i++)
-            if ((unsigned char)in[i] < 32 || (unsigned char)in[i] == 127)
+            if ((unsigned char)in[i] < 32 || (unsigned char)in[i] > 126)
                 bad = 1;
         if (bad) {
-            say("!! letters, digits and simple punctuation only.\r\n"
-                "!! само букви, цифри и проста пунктуация.\r\n");
+            say("!! Latin letters, digits and simple punctuation only.\r\n"
+                "!! Samo latinitsa, tsifri i prosta punktuatsiya.\r\n");
             continue;
         }
         if (len > COMMENT_MAX) {
             sayf("!! too long: %u characters, the limit is %u\r\n"
-                 "!! твърде дълго: %u знака, максимум %u\r\n",
+                 "!! tvarde dalgo: %u znaka, maksimum %u\r\n",
                  (unsigned)len, (unsigned)COMMENT_MAX,
                  (unsigned)len, (unsigned)COMMENT_MAX);
             continue;
@@ -496,12 +494,6 @@ static int next_number(const char *dir)
 
 int main(void)
 {
-    // Консоль у cp866 — і на вивід, і на ввід. У ньому ж лежать рядки в
-    // самому exe і піде коментар в ABOUT_ME.TXT, тобто ніде нічого не
-    // перекодовується: що набрано, те й записано, те й показано.
-    SetConsoleOutputCP(866);
-    SetConsoleCP(866);
-
     // ---- тека, де лежить сам exe (а не поточна тека процесу) --------------
     char exe[MAX_PATH];
     DWORD len = GetModuleFileNameA(NULL, exe, MAX_PATH);
@@ -549,7 +541,8 @@ int main(void)
     }
 
     // ---- коментар до образу ----------------------------------------------
-    // Байти з клавіатури лягають у файл як є: консоль уже в cp866.
+    // Байти з клавіатури лягають у файл як є: ASCII в будь-якій кодовій
+    // сторінці той самий, перекодовувати нічого.
     static char about[COMMENT_MAX + 2 + sizeof(ABOUT_BODY)];
     char note[COMMENT_MAX + 1];
     unsigned abosize = 0;

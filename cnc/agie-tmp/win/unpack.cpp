@@ -13,7 +13,7 @@
 // програму справді писали.
 //
 // Увесь текст на екрані — англійською; базові запити й пояснення
-// продубльовані болгарською кирилицею (консоль примусово в cp866).
+// продубльовані болгарською латинкою. Тільки ASCII — див. шапку imgtool.h.
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o UNPACK.EXE unpack.cpp
 
@@ -135,7 +135,7 @@ static int do_unpack(const char *dir, const char *imgname)
 
     if (count == 0) {
         say("   The image contains no files.\r\n"
-            "   Образът е празен.\r\n");
+            "   Obrazat e prazen.\r\n");
         vol_close(&v);
         wait_key();
         return 0;
@@ -152,9 +152,9 @@ static int do_unpack(const char *dir, const char *imgname)
         say("   O = extract into it, overwriting files with the same names\r\n"
             "   N = extract into a new folder next to it\r\n"
             "   C = cancel, back to the list\r\n"
-            "   O = разопаковай вътре, презаписвай същите имена\r\n"
-            "   N = нова папка до нея\r\n"
-            "   C = отказване, обратно към списъка\r\n");
+            "   O = razopakovai vatre, presapisvai saeshtite imena\r\n"
+            "   N = nova papka do neya\r\n"
+            "   C = otkazvane, obratno kam spisaka\r\n");
         for (;;) {
             char ch = 0;
             int k = get_key(&ch);
@@ -228,7 +228,6 @@ int main(void)
     Menu m;
     int n;
 
-    con_cp866();
     con_init();
 
     if (!exe_dir(dir, MAX_PATH)) {
@@ -244,8 +243,8 @@ int main(void)
         say("UNPACK - extract the files out of an AGIE floppy image\r\n\r\n"
             "There is no .IMG file next to this program.\r\n"
             "Copy an image here, or make one with NEWIMG.EXE, and start again.\r\n\r\n"
-            "Няма нито един .IMG до тази програма.\r\n"
-            "Копирай образ тук или направи нов с NEWIMG.EXE.\r\n");
+            "Nyama nito edin .IMG do tazi programa.\r\n"
+            "Kopirai obraz tuk ili napravi nov s NEWIMG.EXE.\r\n");
         sayf("\r\nFolder: %s\r\n", dir);
         wait_key();
         con_done();
@@ -256,12 +255,12 @@ int main(void)
     m.it  = images;
     m.n   = n;
     m.t1  = "UNPACK - choose an image and press Enter to extract it";
-    m.t2  = "Избери образ със стрелките и натисни Enter.";
+    m.t2  = "Izberi obraz sas strelkite i natisni Enter.";
     m.h1  = "  Arrows = move   Right/Left = open/close the comment   "
             "Enter = unpack   Esc = quit";
-    m.h2  = "  Стрелки = движение   Дясно/Ляво = целия коментар   "
-            "Enter = разопаковай   Esc = изход";
-    m.btn = "[  Quit  /  Изход  ]";
+    m.h2  = "  Strelki = dvizhenie   Dyasno/Lyavo = tseliya komentar   "
+            "Enter = razopakovai   Esc = izhod";
+    m.btn = "[  Quit  /  Izhod  ]";
     m.infow    = 16;      /* тільки дата: розмір в усіх образів однаковий */
     m.showdone = 0;
 
