@@ -13,7 +13,7 @@
 // програму справді писали.
 //
 // Увесь текст на екрані — англійською; базові запити й пояснення
-// продубльовані болгарською кирилицею (консоль примусово в cp1251).
+// продубльовані болгарською кирилицею (консоль примусово в cp866).
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o UNPACK.EXE unpack.cpp
 
@@ -36,26 +36,26 @@ static void stamp_file(HANDLE f, unsigned date, unsigned time)
 }
 
 /* один файл із образу на диск. 0 = не вийшло, причина вже надрукована */
-static int extract(Vol *v, const Dent *d, const wchar_t *folder)
+static int extract(Vol *v, const Dent *d, const char *folder)
 {
-    wchar_t path[MAX_PATH];
+    char path[MAX_PATH];
     HANDLE  f;
     unsigned left = d->size, c = d->clus, guard = 0;
     int ok = 1;
 
-    _snwprintf(path, MAX_PATH - 1, L"%s\\%s", folder, d->name);
+    _snprintf(path, MAX_PATH - 1, "%s\\%s", folder, d->name);
     path[MAX_PATH - 1] = 0;
 
     if (d->size > 0 && !clus_valid(v, c)) {
-        sayf(L"   %-12s  SKIPPED: the directory entry points outside the data area\r\n",
+        sayf("   %-12s  SKIPPED: the directory entry points outside the data area\r\n",
              d->name);
         return 0;
     }
 
-    f = CreateFileW(path, GENERIC_WRITE, 0, NULL,
+    f = CreateFileA(path, GENERIC_WRITE, 0, NULL,
                     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) {
-        sayf(L"   %-12s  SKIPPED: cannot create the file (code %lu)\r\n",
+        sayf("   %-12s  SKIPPED: cannot create the file (code %lu)\r\n",
              d->name, GetLastError());
         return 0;
     }
@@ -65,19 +65,19 @@ static int extract(Vol *v, const Dent *d, const wchar_t *folder)
         DWORD wrote = 0;
         unsigned next;
         if (!clus_valid(v, c)) {
-            sayf(L"   %-12s  TRUNCATED: the cluster chain breaks after %u of %u bytes\r\n",
+            sayf("   %-12s  TRUNCATED: the cluster chain breaks after %u of %u bytes\r\n",
                  d->name, d->size - left, d->size);
             ok = 0;
             break;
         }
         if (++guard > v->clusters + 2) {
-            sayf(L"   %-12s  TRUNCATED: the cluster chain loops back on itself\r\n",
+            sayf("   %-12s  TRUNCATED: the cluster chain loops back on itself\r\n",
                  d->name);
             ok = 0;
             break;
         }
         if (!WriteFile(f, clus_ptr(v, c), chunk, &wrote, NULL) || wrote != chunk) {
-            sayf(L"   %-12s  FAILED: write error (code %lu)\r\n", d->name, GetLastError());
+            sayf("   %-12s  FAILED: write error (code %lu)\r\n", d->name, GetLastError());
             ok = 0;
             break;
         }
@@ -95,36 +95,36 @@ static int extract(Vol *v, const Dent *d, const wchar_t *folder)
 
 /* один вибраний образ. 1 = розпаковано, роботу закінчено;
    0 = не вийшло або оператор скасував, вертаємось до списку */
-static int do_unpack(const wchar_t *dir, const wchar_t *imgname)
+static int do_unpack(const char *dir, const char *imgname)
 {
     Vol   v;
     Dent  list[512];
-    wchar_t path[MAX_PATH], base[MAX_PATH], folder[MAX_PATH];
-    const wchar_t *err;
-    wchar_t *dot;
+    char path[MAX_PATH], base[MAX_PATH], folder[MAX_PATH];
+    const char *err;
+    char *dot;
     int i, count = 0, done = 0, failed = 0;
 
     cursor_on();
     cls();
 
-    _snwprintf(path, MAX_PATH - 1, L"%s\\%s", dir, imgname);
+    _snprintf(path, MAX_PATH - 1, "%s\\%s", dir, imgname);
     path[MAX_PATH - 1] = 0;
-    wcsncpy(base, imgname, MAX_PATH - 1);
+    strncpy(base, imgname, MAX_PATH - 1);
     base[MAX_PATH - 1] = 0;
-    dot = wcsrchr(base, L'.');
+    dot = strrchr(base, '.');
     if (dot)
         *dot = 0;
 
-    sayf(L"Opening %s ...\r\n", imgname);
+    sayf("Opening %s ...\r\n", imgname);
     err = vol_open(path, &v);
     if (err) {
-        sayf(L"!! %s\r\n", err);
+        sayf("!! %s\r\n", err);
         vol_close(&v);
         wait_key();
         return 0;
     }
-    sayf(L"   FAT12, %u bytes, %u sectors of %u, cluster %u bytes, "
-         L"root holds %u entries\r\n",
+    sayf("   FAT12, %u bytes, %u sectors of %u, cluster %u bytes, "
+         "root holds %u entries\r\n",
          v.totsec * v.bps, v.totsec, v.bps, v.clustersz, v.rootent);
 
     /* увесь корінь, а не до першого нуля: це резервний інструмент,
@@ -134,76 +134,76 @@ static int do_unpack(const wchar_t *dir, const wchar_t *imgname)
             count++;
 
     if (count == 0) {
-        say(L"   The image contains no files.\r\n"
-            L"   Образът е празен.\r\n");
+        say("   The image contains no files.\r\n"
+            "   Образът е празен.\r\n");
         vol_close(&v);
         wait_key();
         return 0;
     }
-    sayf(L"   %d file(s) inside.\r\n", count);
+    sayf("   %d file(s) inside.\r\n", count);
 
     /* ---- куди класти ---------------------------------------------------- */
-    _snwprintf(folder, MAX_PATH - 1, L"%s\\%s", dir, base);
+    _snprintf(folder, MAX_PATH - 1, "%s\\%s", dir, base);
     folder[MAX_PATH - 1] = 0;
 
-    if (GetFileAttributesW(folder) != INVALID_FILE_ATTRIBUTES) {
-        wchar_t c = 0;
-        sayf(L"\r\n!! A folder or file named %s already exists here.\r\n", base);
-        say(L"   O = extract into it, overwriting files with the same names\r\n"
-            L"   N = extract into a new folder next to it\r\n"
-            L"   C = cancel, back to the list\r\n"
-            L"   O = разопаковай вътре, презаписвай същите имена\r\n"
-            L"   N = нова папка до нея\r\n"
-            L"   C = отказване, обратно към списъка\r\n");
+    if (GetFileAttributesA(folder) != INVALID_FILE_ATTRIBUTES) {
+        char c = 0;
+        sayf("\r\n!! A folder or file named %s already exists here.\r\n", base);
+        say("   O = extract into it, overwriting files with the same names\r\n"
+            "   N = extract into a new folder next to it\r\n"
+            "   C = cancel, back to the list\r\n"
+            "   O = разопаковай вътре, презаписвай същите имена\r\n"
+            "   N = нова папка до нея\r\n"
+            "   C = отказване, обратно към списъка\r\n");
         for (;;) {
-            wchar_t ch = 0;
+            char ch = 0;
             int k = get_key(&ch);
-            if (k == K_ESC) { c = L'C'; break; }
+            if (k == K_ESC) { c = 'C'; break; }
             if (k != K_CHAR) continue;
-            if (ch >= L'a' && ch <= L'z')
-                ch = (wchar_t)(ch - L'a' + L'A');
-            if (ch == L'O' || ch == L'N' || ch == L'C') { c = ch; break; }
+            if (ch >= 'a' && ch <= 'z')
+                ch = (char)(ch - 'a' + 'A');
+            if (ch == 'O' || ch == 'N' || ch == 'C') { c = ch; break; }
         }
-        if (c == L'C') {
+        if (c == 'C') {
             vol_close(&v);
             return 0;
         }
-        if (c == L'N') {
+        if (c == 'N') {
             int k;
             for (k = 2; k < 1000; k++) {
-                _snwprintf(folder, MAX_PATH - 1, L"%s\\%s-%d", dir, base, k);
+                _snprintf(folder, MAX_PATH - 1, "%s\\%s-%d", dir, base, k);
                 folder[MAX_PATH - 1] = 0;
-                if (GetFileAttributesW(folder) == INVALID_FILE_ATTRIBUTES)
+                if (GetFileAttributesA(folder) == INVALID_FILE_ATTRIBUTES)
                     break;
             }
             if (k >= 1000) {
-                say(L"!! no free folder name left; clean the folder up first\r\n");
+                say("!! no free folder name left; clean the folder up first\r\n");
                 vol_close(&v);
                 wait_key();
                 return 0;
             }
-        } else if (!(GetFileAttributesW(folder) & FILE_ATTRIBUTE_DIRECTORY)) {
-            sayf(L"!! %s is a file, not a folder; cannot extract into it\r\n", base);
+        } else if (!(GetFileAttributesA(folder) & FILE_ATTRIBUTE_DIRECTORY)) {
+            sayf("!! %s is a file, not a folder; cannot extract into it\r\n", base);
             vol_close(&v);
             wait_key();
             return 0;
         }
     }
 
-    if (GetFileAttributesW(folder) == INVALID_FILE_ATTRIBUTES
-        && !CreateDirectoryW(folder, NULL)) {
-        sayf(L"!! cannot create the folder (code %lu)\r\n", GetLastError());
+    if (GetFileAttributesA(folder) == INVALID_FILE_ATTRIBUTES
+        && !CreateDirectoryA(folder, NULL)) {
+        sayf("!! cannot create the folder (code %lu)\r\n", GetLastError());
         vol_close(&v);
         wait_key();
         return 0;
     }
 
     /* ---- витягуємо ------------------------------------------------------ */
-    sayf(L"\r\nInto: %s\r\n\r\n", folder);
+    sayf("\r\nInto: %s\r\n\r\n", folder);
     for (i = 0; i < count; i++) {
         Dent *d = &list[i];
         if (extract(&v, d, folder)) {
-            sayf(L"   %-12s  %7u bytes  %04u-%02u-%02u %02u:%02u\r\n",
+            sayf("   %-12s  %7u bytes  %04u-%02u-%02u %02u:%02u\r\n",
                  d->name, d->size,
                  1980 + (d->date >> 9), (d->date >> 5) & 0x0F, d->date & 0x1F,
                  (d->time >> 11) & 0x1F, (d->time >> 5) & 0x3F);
@@ -213,10 +213,10 @@ static int do_unpack(const wchar_t *dir, const wchar_t *imgname)
         }
     }
 
-    sayf(L"\r\n   %d file(s) extracted", done);
+    sayf("\r\n   %d file(s) extracted", done);
     if (failed)
-        sayf(L", %d had trouble (see above)", failed);
-    say(L".\r\n   The image itself was not changed.\r\n");
+        sayf(", %d had trouble (see above)", failed);
+    say(".\r\n   The image itself was not changed.\r\n");
     vol_close(&v);
     wait_key();
     return 1;
@@ -224,15 +224,15 @@ static int do_unpack(const wchar_t *dir, const wchar_t *imgname)
 
 int main(void)
 {
-    wchar_t dir[MAX_PATH];
+    char dir[MAX_PATH];
     Menu m;
     int n;
 
-    con_cp1251();
+    con_cp866();
     con_init();
 
     if (!exe_dir(dir, MAX_PATH)) {
-        say(L"!! cannot work out my own folder\r\n");
+        say("!! cannot work out my own folder\r\n");
         wait_key();
         con_done();
         return 1;
@@ -241,12 +241,12 @@ int main(void)
     n = collect_images(dir, images, MAXIMG);
     if (n == 0) {
         cls();
-        say(L"UNPACK - extract the files out of an AGIE floppy image\r\n\r\n"
-            L"There is no .IMG file next to this program.\r\n"
-            L"Copy an image here, or make one with NEWIMG.EXE, and start again.\r\n\r\n"
-            L"Няма нито един .IMG до тази програма.\r\n"
-            L"Копирай образ тук или направи нов с NEWIMG.EXE.\r\n");
-        sayf(L"\r\nFolder: %s\r\n", dir);
+        say("UNPACK - extract the files out of an AGIE floppy image\r\n\r\n"
+            "There is no .IMG file next to this program.\r\n"
+            "Copy an image here, or make one with NEWIMG.EXE, and start again.\r\n\r\n"
+            "Няма нито един .IMG до тази програма.\r\n"
+            "Копирай образ тук или направи нов с NEWIMG.EXE.\r\n");
+        sayf("\r\nFolder: %s\r\n", dir);
         wait_key();
         con_done();
         return 1;
@@ -255,13 +255,13 @@ int main(void)
     memset(&m, 0, sizeof(m));
     m.it  = images;
     m.n   = n;
-    m.t1  = L"UNPACK - choose an image and press Enter to extract it";
-    m.t2  = L"Избери образ със стрелките и натисни Enter.";
-    m.h1  = L"  Arrows = move   Right/Left = open/close the comment   "
-            L"Enter = unpack   Esc = quit";
-    m.h2  = L"  Стрелки = движение   Дясно/Ляво = целия коментар   "
-            L"Enter = разопаковай   Esc = изход";
-    m.btn = L"[  Quit  /  Изход  ]";
+    m.t1  = "UNPACK - choose an image and press Enter to extract it";
+    m.t2  = "Избери образ със стрелките и натисни Enter.";
+    m.h1  = "  Arrows = move   Right/Left = open/close the comment   "
+            "Enter = unpack   Esc = quit";
+    m.h2  = "  Стрелки = движение   Дясно/Ляво = целия коментар   "
+            "Enter = разопаковай   Esc = изход";
+    m.btn = "[  Quit  /  Изход  ]";
     m.infow    = 16;      /* тільки дата: розмір в усіх образів однаковий */
     m.showdone = 0;
 

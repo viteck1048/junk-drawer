@@ -21,7 +21,9 @@
 // Питає рівно два: як назвати образ (можна нічого) і короткий коментар
 // до нього (теж можна нічого). Коментар лягає першим рядком ABOUT_ME.TXT
 // і закінчується CRLF; PACK.EXE та UNPACK.EXE показують його в своїх
-// списках. Кодування — cp1251, тобто латинка й кирилиця однаково.
+// списках. Кодування — cp866 (DOS-кирилиця), тобто латинка й кирилиця
+// однаково. У ньому ж консоль і рядки в самому exe: усе однобайтове, усі
+// виклики WinAPI — з явним суфіксом A, ніяких широких знаків.
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o NEWIMG.EXE newimg.cpp
 
@@ -101,8 +103,11 @@ static const char README[] =
 "comment shows its first line only, ending in three dots; the right\r\n"
 "arrow key opens it in full, the left arrow folds it back.\r\n"
 "To change the comment, edit the first line; nothing has to be padded.\r\n"
-"Write it in Latin or in Cyrillic, code page 1251, and save it as a\r\n"
-"plain text file. Deleting the file only leaves that column empty;\r\n"
+"The text is Latin or Cyrillic in the DOS code page 866, the one the\r\n"
+"console itself uses, so edit it with something that understands DOS\r\n"
+"text - the Total Commander viewer (F3, then 2) or Notepad++ with\r\n"
+"OEM 866 - not with Notepad, which will show Cyrillic as nonsense and\r\n"
+"save it back wrong. Deleting the file only leaves that column empty;\r\n"
 "nothing else breaks.\r\n"
 "\r\n"
 "FILE NAMING RULES INSIDE THE IMAGE\r\n"
@@ -164,9 +169,12 @@ static const char README[] =
 "si red, koito zavarshva s tri tochki; strelka nadyasno go otvarya\r\n"
 "tsyal, strelka nalyavo go zatvarya obratno.\r\n"
 "Za da smenish komentara, redaktirai parviya red - nishto ne se dopalva\r\n"
-"s intervali. Pishi na latinitsa ili na kirilitsa, kodova stranitsa\r\n"
-"1251, i zapazi faila kato obiknoven tekst. Ako iztriesh faila,\r\n"
-"kolonata prosto ostava prazna - nishto drugo ne se chupi.\r\n"
+"s intervali. Tekstat e na latinitsa ili kirilitsa v DOS kodovata\r\n"
+"stranitsa 866 - sashtata, koyato polzva i konzolata. Redaktirai go s\r\n"
+"programa, koyato razbira DOS tekst: Total Commander (F3, posle 2) ili\r\n"
+"Notepad++ s OEM 866. Ne s Notepad - toi pokazva kirilitsata kato\r\n"
+"bulgur i ya zapisva greshno. Ako iztriesh faila, kolonata prosto\r\n"
+"ostava prazna - nishto drugo ne se chupi.\r\n"
 "\r\n"
 "PRAVILA ZA IMENATA NA FAILOVETE VATRE V OBRAZA\r\n"
 "Samo kratki DOS imena: do 8 znaka, tochka, oshte do 3 znaka.\r\n"
@@ -184,20 +192,23 @@ static const char README[] =
 static const char ABOUT_BODY[] =
 "Do not delete this file.\r\n"
 "The first line above is the comment for this image: everything up to\r\n"
-"the line break, up to 500 characters, Latin or Cyrillic in code page\r\n"
-"1251. PACK.EXE and UNPACK.EXE read it and show it next to the image in\r\n"
-"their lists, wrapped into lines of 50 characters. Nothing is padded:\r\n"
-"just edit the first line and keep the rest of the file as it is.\r\n"
+"the line break, up to 500 characters, Latin or Cyrillic in the DOS\r\n"
+"code page 866. PACK.EXE and UNPACK.EXE read it and show it next to the\r\n"
+"image in their lists, wrapped into lines of 50 characters. Nothing is\r\n"
+"padded: just edit the first line and keep the rest of the file as it\r\n"
+"is. Use an editor that understands DOS text - Total Commander (F3,\r\n"
+"then 2) or Notepad++ with OEM 866; Notepad shows Cyrillic wrong.\r\n"
 "Without this file the comment column simply stays empty; nothing else\r\n"
 "breaks.\r\n"
 "\r\n"
 "Ne iztrivai tozi fail.\r\n"
 "Parviyat red gore e komentarat na tozi obraz: vsichko do kraya na\r\n"
-"reda, do 500 znaka, na latinitsa ili na kirilitsa (kodova stranitsa\r\n"
-"1251). PACK.EXE i UNPACK.EXE go pokazvat v spisaka do imeto na obraza,\r\n"
-"razdelen na redove po 50 znaka. Nishto ne se dopalva s intervali -\r\n"
-"prosto redaktirai parviya red. Bez tozi fail kolonata s komentara\r\n"
-"ostava prazna - nishto drugo.\r\n";
+"reda, do 500 znaka, na latinitsa ili na kirilitsa (DOS kodova\r\n"
+"stranitsa 866). PACK.EXE i UNPACK.EXE go pokazvat v spisaka do imeto\r\n"
+"na obraza, razdelen na redove po 50 znaka. Nishto ne se dopalva s\r\n"
+"intervali - prosto redaktirai parviya red s programa, koyato razbira\r\n"
+"DOS tekst (Total Commander F3-2, Notepad++ s OEM 866). Bez tozi fail\r\n"
+"kolonata s komentara ostava prazna - nishto drugo.\r\n";
 
 // Коментар: без доповнення пробілами, кінець — CRLF, довжина будь-яка до
 // COMMENT_MAX. Стеля потрібна не операторові, а самому файлу: перший рядок
@@ -209,42 +220,31 @@ static const char ABOUT_BODY[] =
 #define NAME_MAX 255
 
 // ---- вивід ----------------------------------------------------------------
-static void say(const wchar_t *s)
+static void say(const char *s)
 {
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD n = 0;
-    if (h == INVALID_HANDLE_VALUE)
+    if (h == INVALID_HANDLE_VALUE || !*s)
         return;
-    if (WriteConsoleW(h, s, (DWORD)wcslen(s), &n, NULL))
+    if (WriteConsoleA(h, s, (DWORD)strlen(s), &n, NULL))
         return;
-    // вивід перенаправлено у файл — консольного API там немає, йдемо в cp1251
-    {
-        int need = WideCharToMultiByte(1251, 0, s, -1, NULL, 0, NULL, NULL);
-        char *a;
-        if (need <= 1)
-            return;
-        a = (char *)malloc((size_t)need);
-        if (!a)
-            return;
-        WideCharToMultiByte(1251, 0, s, -1, a, need, NULL, NULL);
-        WriteFile(h, a, (DWORD)(need - 1), &n, NULL);
-        free(a);
-    }
+    // вивід перенаправлено у файл — консольного API там немає, ті самі байти
+    WriteFile(h, s, (DWORD)strlen(s), &n, NULL);
 }
 
-static void sayf(const wchar_t *fmt, ...)
+static void sayf(const char *fmt, ...)
 {
-    wchar_t buf[1024];
+    char buf[1024];
     va_list ap;
     va_start(ap, fmt);
-    _vsnwprintf(buf, 1023, fmt, ap);
+    _vsnprintf(buf, 1023, fmt, ap);
     buf[1023] = 0;
     va_end(ap);
     say(buf);
 }
 
 // один рядок з клавіатури; 0 = кінець вводу
-static int read_line(wchar_t *buf, size_t cap)
+static int read_line(char *buf, size_t cap)
 {
     HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode, n = 0;
@@ -254,28 +254,27 @@ static int read_line(wchar_t *buf, size_t cap)
     if (h == INVALID_HANDLE_VALUE)
         return 0;
     if (GetConsoleMode(h, &mode)) {
-        if (!ReadConsoleW(h, buf, (DWORD)(cap - 1), &n, NULL) || n == 0)
+        if (!ReadConsoleA(h, buf, (DWORD)(cap - 1), &n, NULL) || n == 0)
             return 0;
         buf[n] = 0;
     } else {
-        char a[1024];
+        // ввід перенаправлено: ті самі байти, без перекодування
         DWORD got = 0;
         i = 0;
-        while (i + 1 < sizeof(a)) {
+        while (i + 1 < cap) {
             char c;
             if (!ReadFile(h, &c, 1, &got, NULL) || got == 0)
                 break;
             if (c == '\n')
                 break;
-            a[i++] = c;
+            buf[i++] = c;
         }
         if (i == 0 && got == 0)
             return 0;
-        a[i] = 0;
-        MultiByteToWideChar(1251, 0, a, -1, buf, (int)cap);
+        buf[i] = 0;
     }
-    i = wcslen(buf);
-    while (i > 0 && (buf[i - 1] == L'\r' || buf[i - 1] == L'\n' || buf[i - 1] == L' '))
+    i = strlen(buf);
+    while (i > 0 && (buf[i - 1] == '\r' || buf[i - 1] == '\n' || buf[i - 1] == ' '))
         buf[--i] = 0;
     return 1;
 }
@@ -283,9 +282,21 @@ static int read_line(wchar_t *buf, size_t cap)
 // пауза тільки тут: без неї вікно зникне раніше, ніж помилку прочитають
 static void fail(void)
 {
-    say(L"\r\n-- press any key --");
+    say("\r\n-- press any key --");
     _getch();
     ExitProcess(1);
+}
+
+// копія рядка з обрізанням по буферу і завжди із завершальним нулем
+static void copy_str(char *dst, size_t cap, const char *src)
+{
+    size_t n = strlen(src);
+    if (cap == 0)
+        return;
+    if (n > cap - 1)
+        n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = 0;
 }
 
 // ---- дрібниці FAT ---------------------------------------------------------
@@ -358,112 +369,94 @@ static unsigned put_file(unsigned char *img, unsigned char *fat, unsigned *next,
     return first;
 }
 
-// Чи лягає рядок у cp1251 без втрат. Саме в cp1251 коментар лежить в
-// ABOUT_ME.TXT, і саме його читають PACK з UNPACK; знак, якого там немає,
-// перетворився б на «?» вже після того, як образ записано.
-static int fits_cp1251(const wchar_t *s, char *out, int cap)
-{
-    BOOL used = FALSE;
-    int n = WideCharToMultiByte(1251, WC_NO_BEST_FIT_CHARS, s, -1,
-                                out, cap, "?", &used);
-    return n > 0 && !used;
-}
-
 // Ім'я образу після номера: тільки друкований ASCII і нічого з того, що
 // Windows не пускає в імена файлів. Порожній ввід — лишається сам номер.
 // 0 = імені не буде; інакше out[] — те, що допишеться після XXX_.
-static int ask_name(wchar_t *out, size_t cap, size_t room)
+static int ask_name(char *out, size_t cap, size_t room)
 {
-    wchar_t in[1024];
+    char in[1024];
     for (;;) {
         size_t len, i;
         int bad = 0;
-        const wchar_t *dot;
+        const char *dot;
 
-        say(L"\r\nName for this image, after the number. ASCII only.\r\n"
-            L"Press Enter on an empty line to leave just the number.\r\n"
-            L"Име на образа, след номера. Само букви ASCII.\r\n"
-            L"Празен ред = само номерът.\r\n> ");
+        say("\r\nName for this image, after the number. ASCII only.\r\n"
+            "Press Enter on an empty line to leave just the number.\r\n"
+            "Име на образа, след номера. Само букви ASCII.\r\n"
+            "Празен ред = само номерът.\r\n> ");
         if (!read_line(in, 1024) || !in[0])
             return 0;
 
         // ".IMG" програма допише сама; хай оператор не сперечається з нею
-        len = wcslen(in);
+        len = strlen(in);
         dot = (len > 4) ? in + len - 4 : NULL;
-        if (dot && (_wcsicmp(dot, L".IMG") == 0)) {
+        if (dot && (_stricmp(dot, ".IMG") == 0)) {
             in[len - 4] = 0;
             len -= 4;
         }
-        while (len > 0 && (in[len - 1] == L' ' || in[len - 1] == L'.'))
+        while (len > 0 && (in[len - 1] == ' ' || in[len - 1] == '.'))
             in[--len] = 0;
         if (len == 0)
             return 0;
 
         for (i = 0; i < len; i++)
-            if (in[i] < 32 || in[i] > 126 || wcschr(L"\\/:*?\"<>|", in[i]))
+            if ((unsigned char)in[i] < 32 || (unsigned char)in[i] > 126
+                || strchr("\\/:*?\"<>|", in[i]))
                 bad = 1;
         if (bad) {
-            say(L"!! Latin letters, digits and simple punctuation only;\r\n"
-                L"!! none of these:  \\ / : * ? \" < > |\r\n"
-                L"!! Само латиница, цифри и проста пунктуация;\r\n"
-                L"!! без тези знаци:  \\ / : * ? \" < > |\r\n");
+            say("!! Latin letters, digits and simple punctuation only;\r\n"
+                "!! none of these:  \\ / : * ? \" < > |\r\n"
+                "!! Само латиница, цифри и проста пунктуация;\r\n"
+                "!! без тези знаци:  \\ / : * ? \" < > |\r\n");
             continue;
         }
         if (len > NAME_MAX || len > room) {
             size_t lim = (NAME_MAX < room) ? NAME_MAX : room;
-            sayf(L"!! too long: %u characters, %u fit here\r\n"
-                 L"!! твърде дълго: %u знака, тук се побират %u\r\n",
+            sayf("!! too long: %u characters, %u fit here\r\n"
+                 "!! твърде дълго: %u знака, тук се побират %u\r\n",
                  (unsigned)len, (unsigned)lim, (unsigned)len, (unsigned)lim);
             continue;
         }
-        wcsncpy(out, in, cap - 1);
-        out[cap - 1] = 0;
+        copy_str(out, cap, in);
         return 1;
     }
 }
 
 // Коментар з клавіатури. Довжина будь-яка до COMMENT_MAX, латинка й кирилиця
 // однаково. 0 = оператор пропустив; інакше out[] — сам коментар, без CRLF.
-static int ask_comment(wchar_t *out, size_t cap)
+static int ask_comment(char *out, size_t cap)
 {
-    wchar_t in[1024];
-    char probe[COMMENT_MAX * 2 + 4];
+    char in[1024];
     for (;;) {
         size_t len, i;
         int bad = 0;
 
-        say(L"\r\nShort comment for this image. Latin or Cyrillic.\r\n"
-            L"Press Enter on an empty line if you do not want one.\r\n"
-            L"Кратък коментар за този образ. Латиница или кирилица.\r\n"
-            L"Празен ред = без коментар.\r\n> ");
+        say("\r\nShort comment for this image. Latin or Cyrillic.\r\n"
+            "Press Enter on an empty line if you do not want one.\r\n"
+            "Кратък коментар за този образ. Латиница или кирилица.\r\n"
+            "Празен ред = без коментар.\r\n> ");
         if (!read_line(in, 1024) || !in[0])
             return 0;
 
-        len = wcslen(in);
+        /* char знаковий, а кирилиця в cp866 — байти понад 127; без
+           приведення вони б виглядали як керівні знаки й летіли в помилку */
+        len = strlen(in);
         for (i = 0; i < len; i++)
-            if (in[i] < 32 || in[i] == 127)
+            if ((unsigned char)in[i] < 32 || (unsigned char)in[i] == 127)
                 bad = 1;
         if (bad) {
-            say(L"!! letters, digits and simple punctuation only.\r\n"
-                L"!! само букви, цифри и проста пунктуация.\r\n");
+            say("!! letters, digits and simple punctuation only.\r\n"
+                "!! само букви, цифри и проста пунктуация.\r\n");
             continue;
         }
         if (len > COMMENT_MAX) {
-            sayf(L"!! too long: %u characters, the limit is %u\r\n"
-                 L"!! твърде дълго: %u знака, максимум %u\r\n",
+            sayf("!! too long: %u characters, the limit is %u\r\n"
+                 "!! твърде дълго: %u знака, максимум %u\r\n",
                  (unsigned)len, (unsigned)COMMENT_MAX,
                  (unsigned)len, (unsigned)COMMENT_MAX);
             continue;
         }
-        if (!fits_cp1251(in, probe, (int)sizeof(probe))) {
-            say(L"!! one of these characters cannot be written into the image;\r\n"
-                L"!! use Latin or Cyrillic only.\r\n"
-                L"!! някой от тези знаци не може да се запише в образа;\r\n"
-                L"!! пиши само на латиница или на кирилица.\r\n");
-            continue;
-        }
-        wcsncpy(out, in, cap - 1);
-        out[cap - 1] = 0;
+        copy_str(out, cap, in);
         return 1;
     }
 }
@@ -471,28 +464,28 @@ static int ask_comment(wchar_t *out, size_t cap)
 // Перший вільний номер образу. Дивимось ТІЛЬКИ на перші три байти імені:
 // 005.IMG і 005_proekt.IMG — той самий слот 005, бо для стійки значить саме
 // номер, а не те, що оператор дописав після нього. -1 = вільних немає.
-static int next_number(const wchar_t *dir)
+static int next_number(const char *dir)
 {
     static char taken[1000];
-    wchar_t pat[MAX_PATH];
-    WIN32_FIND_DATAW fd;
+    char pat[MAX_PATH];
+    WIN32_FIND_DATAA fd;
     HANDLE h;
     int i;
 
     memset(taken, 0, sizeof(taken));
-    _snwprintf(pat, MAX_PATH - 1, L"%s\\*.img", dir);
+    _snprintf(pat, MAX_PATH - 1, "%s\\*.img", dir);
     pat[MAX_PATH - 1] = 0;
-    h = FindFirstFileW(pat, &fd);
+    h = FindFirstFileA(pat, &fd);
     if (h != INVALID_HANDLE_VALUE) {
         do {
-            const wchar_t *f = fd.cFileName;
+            const char *f = fd.cFileName;
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 continue;
-            if (f[0] < L'0' || f[0] > L'9') continue;
-            if (f[1] < L'0' || f[1] > L'9') continue;
-            if (f[2] < L'0' || f[2] > L'9') continue;
-            taken[(f[0] - L'0') * 100 + (f[1] - L'0') * 10 + (f[2] - L'0')] = 1;
-        } while (FindNextFileW(h, &fd));
+            if (f[0] < '0' || f[0] > '9') continue;
+            if (f[1] < '0' || f[1] > '9') continue;
+            if (f[2] < '0' || f[2] > '9') continue;
+            taken[(f[0] - '0') * 100 + (f[1] - '0') * 10 + (f[2] - '0')] = 1;
+        } while (FindNextFileA(h, &fd));
         FindClose(h);
     }
     for (i = 0; i < 1000; i++)
@@ -503,73 +496,71 @@ static int next_number(const wchar_t *dir)
 
 int main(void)
 {
-    // Консоль у cp1251: у ній однаково лягають латинка й кирилиця, і саме в
-    // цьому кодуванні коментар піде в ABOUT_ME.TXT.
-    SetConsoleOutputCP(1251);
-    SetConsoleCP(1251);
+    // Консоль у cp866 — і на вивід, і на ввід. У ньому ж лежать рядки в
+    // самому exe і піде коментар в ABOUT_ME.TXT, тобто ніде нічого не
+    // перекодовується: що набрано, те й записано, те й показано.
+    SetConsoleOutputCP(866);
+    SetConsoleCP(866);
 
     // ---- тека, де лежить сам exe (а не поточна тека процесу) --------------
-    wchar_t exe[MAX_PATH];
-    DWORD len = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    char exe[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, exe, MAX_PATH);
     if (len == 0 || len >= MAX_PATH) {
-        say(L"!! cannot work out my own path\r\n");
+        say("!! cannot work out my own path\r\n");
         fail();
     }
-    wchar_t *slash = wcsrchr(exe, L'\\');
+    char *slash = strrchr(exe, '\\');
     if (!slash) {
-        say(L"!! my own path has no separator\r\n");
+        say("!! my own path has no separator\r\n");
         fail();
     }
     *slash = 0;                       // тепер exe == тека
-    const wchar_t *dir = exe;
+    const char *dir = exe;
 
     // ---- перший вільний номер 000..999 -----------------------------------
-    wchar_t path[MAX_PATH], fname[MAX_PATH], nick[NAME_MAX + 1];
+    char path[MAX_PATH], fname[MAX_PATH], nick[NAME_MAX + 1];
     int n = next_number(dir);
     int room;
     if (n < 0) {
-        say(L"!! all slots from 000 to 999 are taken in this folder\r\n");
+        say("!! all slots from 000 to 999 are taken in this folder\r\n");
         fail();
     }
 
     // ---- як назвати образ -------------------------------------------------
     // скільки знаків лишилось на власне ім'я: тека + \ + "000_" + ім'я + ".IMG"
-    room = MAX_PATH - 1 - (int)wcslen(dir) - 1 - 4 - 4;
+    room = MAX_PATH - 1 - (int)strlen(dir) - 1 - 4 - 4;
     nick[0] = 0;
     if (room < 1)
-        say(L"\r\nThe path to this folder is too long for a name; "
-            L"the image will be just a number.\r\n");
+        say("\r\nThe path to this folder is too long for a name; "
+            "the image will be just a number.\r\n");
     else if (!ask_name(nick, NAME_MAX + 1, (size_t)room))
         nick[0] = 0;
 
     if (nick[0])
-        _snwprintf(fname, MAX_PATH - 1, L"%03d_%s.IMG", n, nick);
+        _snprintf(fname, MAX_PATH - 1, "%03d_%s.IMG", n, nick);
     else
-        _snwprintf(fname, MAX_PATH - 1, L"%03d.IMG", n);
+        _snprintf(fname, MAX_PATH - 1, "%03d.IMG", n);
     fname[MAX_PATH - 1] = 0;
-    _snwprintf(path, MAX_PATH - 1, L"%s\\%s", dir, fname);
+    _snprintf(path, MAX_PATH - 1, "%s\\%s", dir, fname);
     path[MAX_PATH - 1] = 0;
-    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
-        sayf(L"!! %s already exists in this folder\r\n", fname);
+    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+        sayf("!! %s already exists in this folder\r\n", fname);
         fail();
     }
 
     // ---- коментар до образу ----------------------------------------------
-    // cp1251 однобайтове, тому знаків і байтів тут однаково
+    // Байти з клавіатури лягають у файл як є: консоль уже в cp866.
     static char about[COMMENT_MAX + 2 + sizeof(ABOUT_BODY)];
-    wchar_t note[COMMENT_MAX + 1];
+    char note[COMMENT_MAX + 1];
     unsigned abosize = 0;
     note[0] = 0;
     if (ask_comment(note, COMMENT_MAX + 1)) {
-        int nb = WideCharToMultiByte(1251, 0, note, -1, about,
-                                     COMMENT_MAX + 1, NULL, NULL);
-        if (nb > 1) {
-            unsigned k = (unsigned)(nb - 1);        // без завершального нуля
-            about[k++] = '\r';
-            about[k++] = '\n';
-            memcpy(about + k, ABOUT_BODY, sizeof(ABOUT_BODY) - 1);
-            abosize = k + (unsigned)(sizeof(ABOUT_BODY) - 1);
-        }
+        unsigned k = (unsigned)strlen(note);
+        memcpy(about, note, k);
+        about[k++] = '\r';
+        about[k++] = '\n';
+        memcpy(about + k, ABOUT_BODY, sizeof(ABOUT_BODY) - 1);
+        abosize = k + (unsigned)(sizeof(ABOUT_BODY) - 1);
     }
 
     // ---- том у памʼяті ----------------------------------------------------
@@ -628,10 +619,10 @@ int main(void)
         dirent(root + 64, "ABOUT_METXT", 0x20, aboclus0, abosize, ftime, fdate);
 
     // ---- запис ------------------------------------------------------------
-    HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, NULL,
+    HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, NULL,
                            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) {
-        sayf(L"!! cannot create %s (code %lu)\r\n", path, GetLastError());
+        sayf("!! cannot create %s (code %lu)\r\n", path, GetLastError());
         fail();
     }
     DWORD wrote = 0;
@@ -639,28 +630,28 @@ int main(void)
     FlushFileBuffers(f);
     CloseHandle(f);
     if (!ok || wrote != IMGSIZE) {
-        sayf(L"!! only %lu bytes written instead of %u\r\n", wrote, IMGSIZE);
-        DeleteFileW(path);
+        sayf("!! only %lu bytes written instead of %u\r\n", wrote, IMGSIZE);
+        DeleteFileA(path);
         fail();
     }
 
-    sayf(L"created:  %s\r\n", fname);
-    sayf(L"folder:   %s\r\n", dir);
-    sayf(L"size:     %u bytes = %u sectors of %u, no MBR\r\n", IMGSIZE, TOTSEC, BPS);
-    sayf(L"layout:   FAT12, media 0x%02X, %u sectors per track, %u heads, "
-         L"cluster %u bytes\r\n", MEDIA, SPT, HEADS, CLUSTERSZ);
-    sayf(L"inside:   README.TXT, %u bytes, %u cluster(s)\r\n", rdsize, rdclus);
+    sayf("created:  %s\r\n", fname);
+    sayf("folder:   %s\r\n", dir);
+    sayf("size:     %u bytes = %u sectors of %u, no MBR\r\n", IMGSIZE, TOTSEC, BPS);
+    sayf("layout:   FAT12, media 0x%02X, %u sectors per track, %u heads, "
+         "cluster %u bytes\r\n", MEDIA, SPT, HEADS, CLUSTERSZ);
+    sayf("inside:   README.TXT, %u bytes, %u cluster(s)\r\n", rdsize, rdclus);
     if (abosize) {
-        sayf(L"          ABOUT_ME.TXT, %u bytes\r\n", abosize);
-        sayf(L"comment:  %s\r\n", note);
+        sayf("          ABOUT_ME.TXT, %u bytes\r\n", abosize);
+        sayf("comment:  %s\r\n", note);
     } else {
-        say(L"          no ABOUT_ME.TXT - this image has no comment\r\n");
+        say("          no ABOUT_ME.TXT - this image has no comment\r\n");
     }
-    sayf(L"root:     %u entries, %u used\r\n", ROOTENT, abosize ? 3 : 2);
+    sayf("root:     %u entries, %u used\r\n", ROOTENT, abosize ? 3 : 2);
 
     // програма стала діалоговою, тому пауза потрібна й на успіху:
     // інакше вікно згорнеться раніше, ніж оператор прочитає, що вийшло
-    say(L"\r\n-- press any key --");
+    say("\r\n-- press any key --");
     _getch();
     return 0;
 }

@@ -1,6 +1,10 @@
 // conmenu.h — повноекранний список у консолі: стрілки, Enter, Esc,
 //             софт-кнопка внизу, скрол і статусна область під списком.
 //
+// Усе однобайтове: рядки — char, виклики WinAPI — з явним суфіксом A.
+// Кодування — cp866, і воно ж стоїть у консолі, тому жодного перекодування
+// між буфером і екраном немає: скільки байтів, стільки й знакомісць.
+//
 // Малюємо через консольне API напряму (позиція курсора + атрибути кольору).
 // Якщо вивід або ввід перенаправлені (запуск із файлу, тести), усе працює
 // далі: екран не чиститься, кожен кадр просто дописується, а клавіші
@@ -167,30 +171,30 @@ static void cls(void)
     COORD z = {0, 0};
     DWORD n, cells;
     if (!c_out_con) {
-        say(L"\r\n");
+        say("\r\n");
         return;
     }
     if (!GetConsoleScreenBufferInfo(c_out, &c))
         return;
     cells = (DWORD)c.dwSize.X * (DWORD)c.dwSize.Y;
-    FillConsoleOutputCharacterW(c_out, L' ', cells, z, &n);
+    FillConsoleOutputCharacterA(c_out, ' ', cells, z, &n);
     FillConsoleOutputAttribute(c_out, c_attr0, cells, z, &n);
     SetConsoleCursorPosition(c_out, z);
     con_size();
 }
 
 /* один рядок на позиції y, доповнений пробілами до ширини вікна */
-static void putline(int y, WORD a, const wchar_t *s)
+static void putline(int y, WORD a, const char *s)
 {
-    wchar_t buf[256];
+    char buf[256];
     /* у консолі рядок обрізаємо по ширині вікна, у файл/канал — не обрізаємо */
     int w = c_out_con ? (win_w - 1) : 254;
     int i, len;
 
     if (w > 254) w = 254;
-    len = (int)wcslen(s);
+    len = (int)strlen(s);
     for (i = 0; i < w; i++)
-        buf[i] = (i < len) ? s[i] : L' ';
+        buf[i] = (i < len) ? s[i] : ' ';
     buf[w] = 0;
 
     if (c_out_con) {
@@ -204,19 +208,19 @@ static void putline(int y, WORD a, const wchar_t *s)
     } else {
         /* без консолі кольору немає — обрізаємо хвостові пробіли */
         len = w;
-        while (len > 0 && buf[len - 1] == L' ')
+        while (len > 0 && buf[len - 1] == ' ')
             buf[len - 1] = 0, len--;
         say(buf);
-        say(L"\r\n");
+        say("\r\n");
     }
 }
 
-static void putlinef(int y, WORD a, const wchar_t *fmt, ...)
+static void putlinef(int y, WORD a, const char *fmt, ...)
 {
-    wchar_t buf[256];
+    char buf[256];
     va_list ap;
     va_start(ap, fmt);
-    _vsnwprintf(buf, 255, fmt, ap);
+    _vsnprintf(buf, 255, fmt, ap);
     buf[255] = 0;
     va_end(ap);
     putline(y, a, buf);
@@ -225,7 +229,7 @@ static void putlinef(int y, WORD a, const wchar_t *fmt, ...)
 /* ---- клавіші ------------------------------------------------------------ */
 
 /* запасний шлях: ввід перенаправлено, читаємо назви клавіш словами */
-static int key_from_line(wchar_t *ch)
+static int key_from_line(char *ch)
 {
     char a[64];
     DWORD got = 0;
@@ -252,11 +256,11 @@ static int key_from_line(wchar_t *ch)
     if (!_stricmp(a, "END"))   return K_END;
     if (!_stricmp(a, "ENTER")) return K_ENTER;
     if (!_stricmp(a, "ESC") || !a[0]) return K_ESC;
-    if (ch) *ch = (wchar_t)a[0];
+    if (ch) *ch = (char)a[0];
     return K_CHAR;
 }
 
-static int get_key(wchar_t *ch)
+static int get_key(char *ch)
 {
     if (ch) *ch = 0;
     if (!c_in_con)
@@ -264,7 +268,7 @@ static int get_key(wchar_t *ch)
     for (;;) {
         INPUT_RECORD r;
         DWORD n = 0;
-        if (!ReadConsoleInputW(c_in, &r, 1, &n) || n == 0)
+        if (!ReadConsoleInputA(c_in, &r, 1, &n) || n == 0)
             return K_ESC;
         if (r.EventType != KEY_EVENT || !r.Event.KeyEvent.bKeyDown)
             continue;
@@ -281,8 +285,10 @@ static int get_key(wchar_t *ch)
         case VK_ESCAPE: return K_ESC;
         default: break;
         }
-        if (r.Event.KeyEvent.uChar.UnicodeChar >= 32) {
-            if (ch) *ch = r.Event.KeyEvent.uChar.UnicodeChar;
+        /* char знаковий, а кирилиця в cp866 — це байти понад 127;
+           без приведення вони б виглядали як керівні знаки */
+        if ((unsigned char)r.Event.KeyEvent.uChar.AsciiChar >= 32) {
+            if (ch) *ch = r.Event.KeyEvent.uChar.AsciiChar;
             return K_CHAR;
         }
     }
@@ -291,7 +297,7 @@ static int get_key(wchar_t *ch)
 /* «натисни будь-яку клавішу», але без рядкового вводу */
 static void wait_key(void)
 {
-    say(L"\r\nPress any key.  Натисни кой да е клавиш.\r\n");
+    say("\r\nPress any key.  Натисни кой да е клавиш.\r\n");
     get_key(NULL);
 }
 
@@ -300,10 +306,10 @@ static void wait_key(void)
 #define NAMEW 16               /* стільки знакомісць під ім'я образу/файлу */
 
 typedef struct {
-    wchar_t name[96];      /* справжнє ім'я файлу на диску */
-    wchar_t disp[96];      /* як показувати (у pack — великими літерами) */
-    wchar_t info[48];
-    wchar_t nline[NOTE_MAXL][NOTE_W + 1];  /* коментар, уже розкладений по рядках */
+    char name[96];      /* справжнє ім'я файлу на диску */
+    char disp[96];      /* як показувати (у pack — великими літерами) */
+    char info[48];
+    char nline[NOTE_MAXL][NOTE_W + 1];  /* коментар, уже розкладений по рядках */
     int     nlines;        /* скільки їх; 0 = коментаря немає */
     int     open;          /* коментар розгорнутий на всі рядки */
     int     done;          /* уже записаний в образ -> сірим */
@@ -317,9 +323,9 @@ typedef struct {
     int    ybtn, yhint, ystat;
     int    infow;                /* ширина колонки з датою (і розміром) */
     int    showdone;             /* чи є взагалі колонка «added» */
-    const wchar_t *t1, *t2;
-    const wchar_t *h1, *h2;
-    const wchar_t *btn;
+    const char *t1, *t2;
+    const char *h1, *h2;
+    const char *btn;
 } Menu;
 
 #define STATLINES 4
@@ -355,38 +361,38 @@ static int item_at(const Menu *m, int ln)
 }
 
 /* ім'я в NAMEW знакомісць; довше — тильда на останньому */
-static void name_cut(const wchar_t *s, wchar_t *out)
+static void name_cut(const char *s, char *out)
 {
-    size_t len = wcslen(s);
+    size_t len = strlen(s);
     if (len <= NAMEW) {
-        wcscpy(out, s);
+        strcpy(out, s);
         return;
     }
-    wcsncpy(out, s, NAMEW - 1);
-    out[NAMEW - 1] = L'~';
+    strncpy(out, s, NAMEW - 1);
+    out[NAMEW - 1] = '~';
     out[NAMEW] = 0;
 }
 
 /* Перший рядок коментаря для згорнутого пункту. Якщо далі є ще рядки,
    останні три значущі знаки заміняємо крапками — той самий знак обірваності,
    що й тильда в задовгому імені. */
-static void note_head(const MItem *e, wchar_t *out)
+static void note_head(const MItem *e, char *out)
 {
     int len;
     out[0] = 0;
     if (e->nlines == 0)
         return;
-    wcscpy(out, e->nline[0]);
+    strcpy(out, e->nline[0]);
     if (e->nlines == 1)
         return;
-    len = (int)wcslen(out);
+    len = (int)strlen(out);
     if (len <= 3) {
-        wcscpy(out, L"...");
+        strcpy(out, "...");
         return;
     }
-    out[len - 3] = L'.';
-    out[len - 2] = L'.';
-    out[len - 1] = L'.';
+    out[len - 3] = '.';
+    out[len - 2] = '.';
+    out[len - 1] = '.';
 }
 
 static void menu_layout(Menu *m)
@@ -441,8 +447,8 @@ static void menu_show_sel(Menu *m)
 
 static void menu_draw_items(Menu *m)
 {
-    wchar_t nm[NAMEW + 2], nt[NOTE_W + 4];
-    const wchar_t *gap = m->showdone ? L"       " : L"";
+    char nm[NAMEW + 2], nt[NOTE_W + 4];
+    const char *gap = m->showdone ? "       " : "";
     int k, j, ln = 0, y = 0;
 
     for (k = 0; k < m->n && y < m->rows; k++) {
@@ -460,36 +466,36 @@ static void menu_draw_items(Menu *m)
                 if (h == 1)
                     note_head(e, nt);
                 else
-                    wcscpy(nt, e->nline[0]);
-                putlinef(m->y0 + y, a, L" %s %-*s %-*s %s%s",
-                         (k == m->sel) ? L">" : L" ",
+                    strcpy(nt, e->nline[0]);
+                putlinef(m->y0 + y, a, " %s %-*s %-*s %s%s",
+                         (k == m->sel) ? ">" : " ",
                          NAMEW, nm, m->infow, e->info,
-                         (m->showdone && e->done) ? L"added  " : gap, nt);
+                         (m->showdone && e->done) ? "added  " : gap, nt);
             } else {
-                putlinef(m->y0 + y, a, L"   %-*s %-*s %s%s",
-                         NAMEW, L"", m->infow, L"", gap, e->nline[j]);
+                putlinef(m->y0 + y, a, "   %-*s %-*s %s%s",
+                         NAMEW, "", m->infow, "", gap, e->nline[j]);
             }
             y++;
         }
     }
     while (y < m->rows) {
-        putline(m->y0 + y, A_PLAIN, L"");
+        putline(m->y0 + y, A_PLAIN, "");
         y++;
     }
     putlinef(m->ybtn, (m->sel == m->n) ? A_SEL : A_PLAIN,
-             L" %s %s", (m->sel == m->n) ? L">" : L" ", m->btn);
+             " %s %s", (m->sel == m->n) ? ">" : " ", m->btn);
 }
 
 /* усе, крім статусної області */
 static void menu_paint(Menu *m)
 {
     menu_layout(m);
-    putlinef(0, A_TITLE, L"%s   [ %d / %d ]",
+    putlinef(0, A_TITLE, "%s   [ %d / %d ]",
              m->t1, (m->sel < m->n) ? m->sel + 1 : m->n, m->n);
     putline(1, A_TITLE, m->t2);
-    putline(2, A_PLAIN, L"");
+    putline(2, A_PLAIN, "");
     menu_draw_items(m);
-    putline(m->ybtn + 1, A_PLAIN, L"");
+    putline(m->ybtn + 1, A_PLAIN, "");
     putline(m->yhint,     A_HINT, m->h1);
     putline(m->yhint + 1, A_HINT, m->h2);
 }
@@ -505,7 +511,7 @@ static void menu_draw(Menu *m)
 static void menu_refresh(Menu *m)
 {
     menu_layout(m);
-    putlinef(0, A_TITLE, L"%s   [ %d / %d ]",
+    putlinef(0, A_TITLE, "%s   [ %d / %d ]",
              m->t1, (m->sel < m->n) ? m->sel + 1 : m->n, m->n);
     menu_draw_items(m);
 }
@@ -528,17 +534,17 @@ static void menu_status_clear(Menu *m)
 {
     int i;
     for (i = 0; i < STATLINES; i++)
-        putline(m->ystat + i, A_PLAIN, L"");
+        putline(m->ystat + i, A_PLAIN, "");
 }
 
-static void menu_status(Menu *m, int line, WORD a, const wchar_t *fmt, ...)
+static void menu_status(Menu *m, int line, WORD a, const char *fmt, ...)
 {
-    wchar_t buf[256];
+    char buf[256];
     va_list ap;
     if (line < 0 || line >= STATLINES)
         return;
     va_start(ap, fmt);
-    _vsnwprintf(buf, 255, fmt, ap);
+    _vsnprintf(buf, 255, fmt, ap);
     buf[255] = 0;
     va_end(ap);
     putline(m->ystat + line, a, buf);
@@ -623,27 +629,27 @@ static int menu_key(Menu *m)
 
 /* ===================== збір списків ===================================== */
 
-static void stamp_info(const FILETIME *ft, DWORD size, wchar_t *out, size_t cap)
+static void stamp_info(const FILETIME *ft, DWORD size, char *out, size_t cap)
 {
     SYSTEMTIME st;
     FILETIME lft;
     if (FileTimeToLocalFileTime(ft, &lft) && FileTimeToSystemTime(&lft, &st))
-        _snwprintf(out, cap - 1, L"%7lu bytes  %04u-%02u-%02u %02u:%02u",
+        _snprintf(out, cap - 1, "%7lu bytes  %04u-%02u-%02u %02u:%02u",
                    (unsigned long)size, st.wYear, st.wMonth, st.wDay,
                    st.wHour, st.wMinute);
     else
-        _snwprintf(out, cap - 1, L"%7lu bytes", (unsigned long)size);
+        _snprintf(out, cap - 1, "%7lu bytes", (unsigned long)size);
     out[cap - 1] = 0;
 }
 
 /* Для образів розміру в списку немає: він однаковий у всіх (720 КБ) і в
    колонці був би самим лише шумом. Лишається час останнього запису. */
-static void stamp_date(const FILETIME *ft, wchar_t *out, size_t cap)
+static void stamp_date(const FILETIME *ft, char *out, size_t cap)
 {
     SYSTEMTIME st;
     FILETIME lft;
     if (FileTimeToLocalFileTime(ft, &lft) && FileTimeToSystemTime(&lft, &st))
-        _snwprintf(out, cap - 1, L"%04u-%02u-%02u %02u:%02u",
+        _snprintf(out, cap - 1, "%04u-%02u-%02u %02u:%02u",
                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
     else
         out[0] = 0;
@@ -657,38 +663,38 @@ static void sort_items(MItem *it, int n)
     int i, j;
     for (i = 1; i < n; i++) {
         MItem t = it[i];
-        for (j = i - 1; j >= 0 && _wcsicmp(it[j].disp, t.disp) > 0; j--)
+        for (j = i - 1; j >= 0 && _stricmp(it[j].disp, t.disp) > 0; j--)
             it[j + 1] = it[j];
         it[j + 1] = t;
     }
 }
 
 /* усі *.IMG поряд */
-static int collect_images(const wchar_t *dir, MItem *it, int max)
+static int collect_images(const char *dir, MItem *it, int max)
 {
-    wchar_t pat[MAX_PATH];
-    WIN32_FIND_DATAW fd;
+    char pat[MAX_PATH];
+    WIN32_FIND_DATAA fd;
     HANDLE h;
     int n = 0;
-    _snwprintf(pat, MAX_PATH - 1, L"%s\\*.img", dir);
+    _snprintf(pat, MAX_PATH - 1, "%s\\*.img", dir);
     pat[MAX_PATH - 1] = 0;
-    h = FindFirstFileW(pat, &fd);
+    h = FindFirstFileA(pat, &fd);
     if (h == INVALID_HANDLE_VALUE)
         return 0;
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             continue;
-        if (fd.nFileSizeHigh || wcslen(fd.cFileName) > 90)
+        if (fd.nFileSizeHigh || strlen(fd.cFileName) > 90)
             continue;
         if (n >= max)
             break;
-        wcscpy(it[n].name, fd.cFileName);
-        wcscpy(it[n].disp, fd.cFileName);
+        strcpy(it[n].name, fd.cFileName);
+        strcpy(it[n].disp, fd.cFileName);
         stamp_date(&fd.ftLastWriteTime, it[n].info, 48);
         {   /* коментар з ABOUT_ME.TXT; немає файлу — колонка лишається порожня */
-            wchar_t full[MAX_PATH];
-            static wchar_t note[NOTE_MAX + 1];
-            _snwprintf(full, MAX_PATH - 1, L"%s\\%s", dir, fd.cFileName);
+            char full[MAX_PATH];
+            static char note[NOTE_MAX + 1];
+            _snprintf(full, MAX_PATH - 1, "%s\\%s", dir, fd.cFileName);
             full[MAX_PATH - 1] = 0;
             it[n].nlines = read_about(full, note, NOTE_MAX + 1)
                          ? wrap_note(note, it[n].nline, NOTE_MAXL) : 0;
@@ -696,7 +702,7 @@ static int collect_images(const wchar_t *dir, MItem *it, int max)
         it[n].open = 0;
         it[n].done = 0;
         n++;
-    } while (FindNextFileW(h, &fd));
+    } while (FindNextFileA(h, &fd));
     FindClose(h);
     sort_items(it, n);
     return n;
@@ -707,47 +713,47 @@ static int collect_images(const wchar_t *dir, MItem *it, int max)
    поблажка; в образ ім'я теж піде великими.
    .EXE відкидаємо: це наші ж утиліти, на дискеті стійки їм нічого робити.
    Образи відсіюються самі — 737280 Б більше за 360 КБ. */
-static int collect_files(const wchar_t *dir, MItem *it, int max, DWORD maxsize)
+static int collect_files(const char *dir, MItem *it, int max, DWORD maxsize)
 {
-    wchar_t pat[MAX_PATH];
-    WIN32_FIND_DATAW fd;
+    char pat[MAX_PATH];
+    WIN32_FIND_DATAA fd;
     HANDLE h;
     int n = 0;
-    _snwprintf(pat, MAX_PATH - 1, L"%s\\*", dir);
+    _snprintf(pat, MAX_PATH - 1, "%s\\*", dir);
     pat[MAX_PATH - 1] = 0;
-    h = FindFirstFileW(pat, &fd);
+    h = FindFirstFileA(pat, &fd);
     if (h == INVALID_HANDLE_VALUE)
         return 0;
     do {
-        wchar_t up[96];
+        char up[96];
         size_t i, len;
-        const wchar_t *dot;
+        const char *dot;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             continue;
         if (fd.nFileSizeHigh || fd.nFileSizeLow > maxsize)
             continue;
-        len = wcslen(fd.cFileName);
+        len = strlen(fd.cFileName);
         if (len == 0 || len > 12)
             continue;
         for (i = 0; i <= len; i++) {
-            wchar_t c = fd.cFileName[i];
-            up[i] = (c >= L'a' && c <= L'z') ? (wchar_t)(c - L'a' + L'A') : c;
+            char c = fd.cFileName[i];
+            up[i] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
         }
         if (name_83_check(up) != NULL)
             continue;
-        dot = wcsrchr(up, L'.');
-        if (dot && _wcsicmp(dot, L".EXE") == 0)
+        dot = strrchr(up, '.');
+        if (dot && _stricmp(dot, ".EXE") == 0)
             continue;
         if (n >= max)
             break;
-        wcscpy(it[n].name, fd.cFileName);
-        wcscpy(it[n].disp, up);
+        strcpy(it[n].name, fd.cFileName);
+        strcpy(it[n].disp, up);
         stamp_info(&fd.ftLastWriteTime, fd.nFileSizeLow, it[n].info, 48);
         it[n].nlines = 0;
         it[n].open = 0;
         it[n].done = 0;
         n++;
-    } while (FindNextFileW(h, &fd));
+    } while (FindNextFileA(h, &fd));
     FindClose(h);
     sort_items(it, n);
     return n;

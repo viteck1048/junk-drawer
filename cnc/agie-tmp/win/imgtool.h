@@ -10,7 +10,14 @@
 // Увесь текст, що бачить оператор, — англійською; базові запити й правила
 // імен продубльовані болгарською кирилицею. Коментарі — українською.
 //
-// Кодування — cp1251: у ньому й консоль, і коментар усередині образу.
+// Кодування — cp866 (DOS-кирилиця), однобайтове, і всюди одне й те саме:
+// у ньому консоль, у ньому коментар усередині образу, у ньому ж рядки в
+// самому exe (див. -fexec-charset у build.sh). Ніяких широких знаків: усі
+// виклики WinAPI — явно однобайтові, з суфіксом A.
+//
+// Чому 866, а не 1251: на цехових машинах (XP і Win7) консоль піднімається
+// саме в 866, і растровий шрифт консолі має гліфи саме під неї. 1251 там
+// або не встає, або встає без гліфів — кирилиця перетворюється на сміття.
 
 #ifndef IMGTOOL_H
 #define IMGTOOL_H
@@ -21,83 +28,83 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <wchar.h>
 
 /* ===================== консоль ========================================== */
 
-static void say(const wchar_t *s)
+/* Рядок на екран як є, байт у байт. Якщо вивід перенаправлено у файл або
+   канал, WriteConsoleA не спрацює — тоді ті самі байти йдуть WriteFile. */
+static void say(const char *s)
 {
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD n = 0;
-    if (h == INVALID_HANDLE_VALUE)
+    DWORD n = 0, len = (DWORD)strlen(s);
+    if (h == INVALID_HANDLE_VALUE || len == 0)
         return;
-    if (WriteConsoleW(h, s, (DWORD)wcslen(s), &n, NULL))
+    if (WriteConsoleA(h, s, len, &n, NULL))
         return;
-    /* вивід перенаправлено у файл — консольного API там немає, йдемо в cp1251 */
-    {
-        int need = WideCharToMultiByte(1251, 0, s, -1, NULL, 0, NULL, NULL);
-        char *a;
-        if (need <= 1)
-            return;
-        a = (char *)malloc((size_t)need);
-        if (!a)
-            return;
-        WideCharToMultiByte(1251, 0, s, -1, a, need, NULL, NULL);
-        WriteFile(h, a, (DWORD)(need - 1), &n, NULL);
-        free(a);
-    }
+    WriteFile(h, s, len, &n, NULL);
 }
 
-static void sayf(const wchar_t *fmt, ...)
+static void sayf(const char *fmt, ...)
 {
-    wchar_t buf[2048];
+    char buf[2048];
     va_list ap;
     va_start(ap, fmt);
-    _vsnwprintf(buf, 2047, fmt, ap);
+    _vsnprintf(buf, 2047, fmt, ap);
     buf[2047] = 0;
     va_end(ap);
     say(buf);
 }
 
-/* Консоль примусово в cp1251. Самі рядки ми пишемо WriteConsoleW, тобто
-   широкими знаками, і кодова сторінка на них не впливає; вона потрібна для
-   вводу, для перенаправленого виводу і для того, щоб консоль узяла шрифт,
-   у якому кирилиця взагалі є. Те саме кодування лежить і в ABOUT_ME.TXT. */
-static void con_cp1251(void)
+/* Консоль примусово в cp866 — і на вивід, і на ввід. Байти, які ми пишемо,
+   консоль так і покаже, а байти, які оператор набере, так і прочитаємо: між
+   екраном, клавіатурою і ABOUT_ME.TXT ніякого перекодування немає взагалі. */
+static void con_cp866(void)
 {
-    SetConsoleOutputCP(1251);
-    SetConsoleCP(1251);
+    SetConsoleOutputCP(866);
+    SetConsoleCP(866);
 }
 
 /* пауза потрібна тільки там, звідки програма більше нічого не питатиме:
    інакше вікно згорнеться раніше, ніж оператор прочитає причину */
 static void pause_exit(int code)
 {
-    say(L"\r\nPress any key to close this window.\r\n");
+    say("\r\nPress any key to close this window.\r\n");
     _getch();
     ExitProcess((UINT)code);
 }
 
 /* ===================== тека, де лежить сам exe ========================== */
 
-static int exe_dir(wchar_t *out, size_t cap)
+static int exe_dir(char *out, size_t cap)
 {
-    wchar_t p[MAX_PATH];
-    DWORD len = GetModuleFileNameW(NULL, p, MAX_PATH);
-    wchar_t *slash;
+    char p[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, p, MAX_PATH);
+    char *slash;
     if (len == 0 || len >= MAX_PATH)
         return 0;
-    slash = wcsrchr(p, L'\\');
+    slash = strrchr(p, '\\');
     if (!slash)
         return 0;
     *slash = 0;
-    if (wcslen(p) + 1 > cap)
+    if (strlen(p) + 1 > cap)
         return 0;
-    wcscpy(out, p);
+    strcpy(out, p);
     return 1;
 }
 
 /* ===================== дрібниці ========================================= */
+
+/* копія рядка з обрізанням по буферу і завжди із завершальним нулем */
+static void copy_str(char *dst, size_t cap, const char *src)
+{
+    size_t n = strlen(src);
+    if (cap == 0)
+        return;
+    if (n > cap - 1)
+        n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = 0;
+}
 
 static unsigned get16(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static unsigned get32(const unsigned char *p)
@@ -129,10 +136,10 @@ typedef struct {
     unsigned  datasec;             /* перший сектор даних */
     unsigned  clusters;            /* скільки кластерів даних (номери 2..clusters+1) */
     unsigned  clustersz;
-    wchar_t   path[MAX_PATH];
+    char   path[MAX_PATH];
 } Vol;
 
-static wchar_t volerr[512];
+static char volerr[512];
 
 static void vol_close(Vol *v)
 {
@@ -141,7 +148,7 @@ static void vol_close(Vol *v)
 }
 
 /* NULL = все гаразд, інакше — текст помилки англійською */
-static const wchar_t *vol_open(const wchar_t *path, Vol *v)
+static const char *vol_open(const char *path, Vol *v)
 {
     HANDLE f;
     DWORD  size, got = 0;
@@ -149,32 +156,32 @@ static const wchar_t *vol_open(const wchar_t *path, Vol *v)
     unsigned datasecs, fatneed;
 
     memset(v, 0, sizeof(*v));
-    wcsncpy(v->path, path, MAX_PATH - 1);
+    copy_str(v->path, MAX_PATH, path);
 
-    f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+    f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) {
-        _snwprintf(volerr, 511, L"cannot open the image (code %lu)", GetLastError());
+        _snprintf(volerr, 511, "cannot open the image (code %lu)", GetLastError());
         return volerr;
     }
     size = GetFileSize(f, NULL);
     if (size == INVALID_FILE_SIZE || size < 512) {
         CloseHandle(f);
-        return L"the file is too small to be a disk image";
+        return "the file is too small to be a disk image";
     }
     if (size > 8u * 1024u * 1024u) {
         CloseHandle(f);
-        return L"the file is far too large to be a floppy image";
+        return "the file is far too large to be a floppy image";
     }
     v->img = (unsigned char *)malloc(size);
     if (!v->img) {
         CloseHandle(f);
-        return L"out of memory";
+        return "out of memory";
     }
     if (!ReadFile(f, v->img, size, &got, NULL) || got != size) {
         CloseHandle(f);
         vol_close(v);
-        return L"the image could not be read to the end";
+        return "the image could not be read to the end";
     }
     CloseHandle(f);
     v->imgsize = size;
@@ -192,37 +199,37 @@ static const wchar_t *vol_open(const wchar_t *path, Vol *v)
         v->totsec = get32(bs + 32);
 
     if (v->bps != 512)
-        return L"not a floppy image: bytes per sector is not 512";
+        return "not a floppy image: bytes per sector is not 512";
     if (v->spc == 0 || (v->spc & (v->spc - 1)) != 0)
-        return L"broken BPB: sectors per cluster is not a power of two";
+        return "broken BPB: sectors per cluster is not a power of two";
     if (v->res == 0 || v->nfat == 0 || v->nfat > 2 || v->spf == 0)
-        return L"broken BPB: reserved sectors or FAT count out of range";
+        return "broken BPB: reserved sectors or FAT count out of range";
     if (v->rootent == 0 || (v->rootent * 32) % v->bps != 0)
-        return L"broken BPB: root directory entry count out of range";
+        return "broken BPB: root directory entry count out of range";
     if (v->totsec == 0)
-        return L"broken BPB: total sector count is zero";
+        return "broken BPB: total sector count is zero";
 
     v->clustersz = v->spc * v->bps;
     v->rootsecs  = v->rootent * 32 / v->bps;
     v->rootsec   = v->res + v->nfat * v->spf;
     v->datasec   = v->rootsec + v->rootsecs;
     if (v->datasec >= v->totsec)
-        return L"broken BPB: no data area left in the volume";
+        return "broken BPB: no data area left in the volume";
     datasecs   = v->totsec - v->datasec;
     v->clusters = datasecs / v->spc;
 
     if (v->clusters >= 4085)
-        return L"this image is not FAT12 (too many clusters); these tools handle FAT12 floppies only";
+        return "this image is not FAT12 (too many clusters); these tools handle FAT12 floppies only";
     fatneed = ((v->clusters + 2) * 3 + 1) / 2;
     if (fatneed > v->spf * v->bps)
-        return L"broken BPB: the FAT is too small for the cluster count";
+        return "broken BPB: the FAT is too small for the cluster count";
     if ((DWORD)v->totsec * v->bps > v->imgsize)
-        return L"the file is shorter than the BPB says the volume is";
+        return "the file is shorter than the BPB says the volume is";
 
     if (bs[510] != 0x55 || bs[511] != 0xAA)
-        say(L"   note: no 0x55AA signature in the boot sector; continuing anyway.\r\n");
+        say("   note: no 0x55AA signature in the boot sector; continuing anyway.\r\n");
     if ((DWORD)v->totsec * v->bps < v->imgsize)
-        say(L"   note: the file has extra bytes after the end of the volume; ignoring them.\r\n");
+        say("   note: the file has extra bytes after the end of the volume; ignoring them.\r\n");
     return NULL;
 }
 
@@ -231,7 +238,7 @@ static int vol_save(Vol *v)
     HANDLE f;
     DWORD wrote = 0;
     BOOL ok;
-    f = CreateFileW(v->path, GENERIC_WRITE, 0, NULL,
+    f = CreateFileA(v->path, GENERIC_WRITE, 0, NULL,
                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE)
         return 0;
@@ -298,7 +305,7 @@ typedef struct {
     int      idx;
     char     raw[11];
     unsigned attr, clus, size, time, date;
-    wchar_t  name[16];      /* NAME.EXT для показу */
+    char  name[16];      /* NAME.EXT для показу */
 } Dent;
 
 static unsigned char *root_ent(Vol *v, int i)
@@ -307,7 +314,7 @@ static unsigned char *root_ent(Vol *v, int i)
 }
 
 /* 8.3 з 11 сирих байтів у NAME.EXT */
-static void raw_to_name(const char *raw, wchar_t *out)
+static void raw_to_name(const char *raw, char *out)
 {
     char n[13];
     int i, k = 0, e;
@@ -321,7 +328,7 @@ static void raw_to_name(const char *raw, wchar_t *out)
             n[k++] = raw[e];
     }
     n[k] = 0;
-    MultiByteToWideChar(1251, 0, n, -1, out, 16);
+    strcpy(out, n);
 }
 
 /* 1 = це справжній файл; 0 = порожньо, стерто, мітка, тека або уламок LFN */
@@ -358,67 +365,67 @@ static int dent_load(Vol *v, int i, Dent *d)
    дефісом чи підкресленням, правити тут і більше ніде.
    Дефіс лишений тому, що він реально трапляється на робочих дискетах
    (1148-2.NC, 1267-1.NC). */
-static const wchar_t *NAME_EXTRA = L"-_";
+static const char *NAME_EXTRA = "-_";
 
-static int name_char_ok(wchar_t c)
+static int name_char_ok(char c)
 {
-    if (c >= L'A' && c <= L'Z') return 1;
-    if (c >= L'0' && c <= L'9') return 1;
-    return wcschr(NAME_EXTRA, c) != NULL && c != 0;
+    if (c >= 'A' && c <= 'Z') return 1;
+    if (c >= '0' && c <= '9') return 1;
+    return strchr(NAME_EXTRA, c) != NULL && c != 0;
 }
 
 static void print_name_rules(void)
 {
-    say(L"\r\n   Name rules inside the image:\r\n"
-        L"     up to 8 characters, then a dot, then up to 3 characters;\r\n"
-        L"     capital letters A-Z, digits 0-9, and - _ only;\r\n"
-        L"     lower case is accepted but stored in capitals;\r\n"
-        L"     no spaces, no Cyrillic, no long names.\r\n"
-        L"     Examples: 1234.NC   PROG.JOB   1148-2.NC   TE45.GEO\r\n"
-        L"   Правила за имената вътре в образа:\r\n"
-        L"     до 8 знака, точка, до 3 знака;\r\n"
-        L"     само главни букви A-Z, цифри 0-9 и - _ ;\r\n"
-        L"     малките букви се приемат и стават главни;\r\n"
-        L"     без интервал, без кирилица, без дълги имена.\r\n");
+    say("\r\n   Name rules inside the image:\r\n"
+        "     up to 8 characters, then a dot, then up to 3 characters;\r\n"
+        "     capital letters A-Z, digits 0-9, and - _ only;\r\n"
+        "     lower case is accepted but stored in capitals;\r\n"
+        "     no spaces, no Cyrillic, no long names.\r\n"
+        "     Examples: 1234.NC   PROG.JOB   1148-2.NC   TE45.GEO\r\n"
+        "   Правила за имената вътре в образа:\r\n"
+        "     до 8 знака, точка, до 3 знака;\r\n"
+        "     само главни букви A-Z, цифри 0-9 и - _ ;\r\n"
+        "     малките букви се приемат и стават главни;\r\n"
+        "     без интервал, без кирилица, без дълги имена.\r\n");
 }
 
 /* Ім'я файлу-кандидата: суворо 8.3, великі літери. NULL = гаразд. */
-static const wchar_t *name_83_check(const wchar_t *s)
+static const char *name_83_check(const char *s)
 {
-    const wchar_t *dot;
+    const char *dot;
     size_t n, e;
     if (!*s)
-        return L"the name is empty";
-    if (wcspbrk(s, L"\\/:"))
-        return L"give the file name only, without a path; the file must sit next to this program";
-    dot = wcschr(s, L'.');
-    if (dot && wcschr(dot + 1, L'.'))
-        return L"a DOS name may contain only one dot";
-    n = dot ? (size_t)(dot - s) : wcslen(s);
-    e = dot ? wcslen(dot + 1) : 0;
+        return "the name is empty";
+    if (strpbrk(s, "\\/:"))
+        return "give the file name only, without a path; the file must sit next to this program";
+    dot = strchr(s, '.');
+    if (dot && strchr(dot + 1, '.'))
+        return "a DOS name may contain only one dot";
+    n = dot ? (size_t)(dot - s) : strlen(s);
+    e = dot ? strlen(dot + 1) : 0;
     if (n < 1 || n > 8)
-        return L"the part before the dot must be 1 to 8 characters long";
+        return "the part before the dot must be 1 to 8 characters long";
     if (dot && (e < 1 || e > 3))
-        return L"the part after the dot must be 1 to 3 characters long";
+        return "the part after the dot must be 1 to 3 characters long";
     {
         size_t i;
-        for (i = 0; i < wcslen(s); i++) {
-            if (s[i] == L'.')
+        for (i = 0; i < strlen(s); i++) {
+            if (s[i] == '.')
                 continue;
-            if (s[i] >= L'a' && s[i] <= L'z')
-                return L"lower case is not allowed; the name must be in capital letters";
+            if (s[i] >= 'a' && s[i] <= 'z')
+                return "lower case is not allowed; the name must be in capital letters";
             if (!name_char_ok(s[i]))
-                return L"the name contains a character that is not allowed";
+                return "the name contains a character that is not allowed";
         }
     }
     return NULL;
 }
 
 /* 8.3 -> 11 сирих байтів запису каталогу */
-static void name_to_raw(const wchar_t *s, char *raw)
+static void name_to_raw(const char *s, char *raw)
 {
-    const wchar_t *dot = wcschr(s, L'.');
-    size_t n = dot ? (size_t)(dot - s) : wcslen(s);
+    const char *dot = strchr(s, '.');
+    size_t n = dot ? (size_t)(dot - s) : strlen(s);
     size_t i;
     memset(raw, ' ', 11);
     for (i = 0; i < n && i < 8; i++)
@@ -436,7 +443,7 @@ static void name_to_raw(const wchar_t *s, char *raw)
 
    Коментар більше не доповнюється пробілами до 50 знаків і більше не
    обмежений ними: кінець коментаря — CRLF, довжина будь-яка до NOTE_MAX.
-   Байти — cp1251, тобто латинка і кирилиця однаково. Старі образи (рівно
+   Байти — cp866, тобто латинка і кирилиця однаково. Старі образи (рівно
    50 знаків, доповнені пробілами, і той самий CRLF) читаються тим самим
    кодом: хвостові пробіли обрізаються й від них нічого не лишається.
 
@@ -461,13 +468,12 @@ static int read_at(HANDLE f, DWORD off, void *buf, DWORD len)
     return ReadFile(f, buf, len, &got, NULL) && got == len;
 }
 
-/* Коментар образу в out[] (широкими знаками). 0 = коментаря немає.
-   cap має бути не менше за NOTE_MAX + 1. */
-static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
+/* Коментар образу в out[], байт у байт як він лежить в образі (cp866).
+   0 = коментаря немає. cap має бути не менше за NOTE_MAX + 1. */
+static int read_about(const char *path, char *out, size_t cap)
 {
     static unsigned char root[512 * 32];
     unsigned char bs[512], data[NOTE_MAX + 2];
-    char text[NOTE_MAX + 1];
     HANDLE f;
     unsigned bps, spc, res, nfat, rootent, spf, rootsec, datasec, clustersz;
     unsigned clus = 0, size = 0, want;
@@ -477,7 +483,7 @@ static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
     if (cap < NOTE_MAX + 1)
         return 0;
 
-    f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+    f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE)
         return 0;
@@ -528,42 +534,39 @@ static int read_about(const wchar_t *path, wchar_t *out, size_t cap)
     for (n = 0; n < (int)want && n < NOTE_MAX; n++) {
         if (data[n] < 32 || data[n] == 127)
             break;
-        text[n] = (char)data[n];
+        out[n] = (char)data[n];
     }
-    while (n > 0 && text[n - 1] == ' ')
+    while (n > 0 && out[n - 1] == ' ')
         n--;
-    text[n] = 0;
-    if (n == 0)
-        return 0;
-    MultiByteToWideChar(1251, 0, text, -1, out, (int)cap);
-    return 1;
+    out[n] = 0;
+    return n > 0;
 }
 
 /* Розкласти коментар на рядки не довші за NOTE_W, переносячи слова цілком.
    Слово, довше за цілий рядок, ріжеться силоміць — інакше його нікуди дінеш.
    Повертає скільки рядків вийшло, не більше за maxl. */
-static int wrap_note(const wchar_t *s, wchar_t lines[][NOTE_W + 1], int maxl)
+static int wrap_note(const char *s, char lines[][NOTE_W + 1], int maxl)
 {
     int nl = 0;
     while (*s && nl < maxl) {
         size_t len, cut, i;
-        while (*s == L' ')
+        while (*s == ' ')
             s++;
         if (!*s)
             break;
-        len = wcslen(s);
+        len = strlen(s);
         if (len <= NOTE_W) {
             cut = len;
         } else {
             cut = 0;
             for (i = NOTE_W; i > 0; i--)          /* назад до найближчого пробілу */
-                if (s[i] == L' ') { cut = i; break; }
+                if (s[i] == ' ') { cut = i; break; }
             if (cut == 0)
                 cut = NOTE_W;                     /* суцільне слово — ріжемо */
         }
-        wcsncpy(lines[nl], s, cut);
+        memcpy(lines[nl], s, cut);
         lines[nl][cut] = 0;
-        while (cut > 0 && lines[nl][cut - 1] == L' ')
+        while (cut > 0 && lines[nl][cut - 1] == ' ')
             lines[nl][--cut] = 0;
         if (cut > 0)
             nl++;

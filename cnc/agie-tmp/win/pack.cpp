@@ -21,7 +21,7 @@
 // Дата й час запису каталогу беруться з самого файлу, а не з годинника.
 //
 // Увесь текст на екрані — англійською; базові запити й пояснення
-// продубльовані болгарською кирилицею (консоль примусово в cp1251).
+// продубльовані болгарською кирилицею (консоль примусово в cp866).
 //
 // Збірка:  i686-w64-mingw32-g++ -O2 -s -static -o PACK.EXE pack.cpp
 
@@ -35,13 +35,13 @@ static MItem images[MAXIMG];
 static MItem files[MAXFILE];
 
 /* час останнього запису файлу -> дата й час запису каталогу FAT */
-static void file_stamp(const wchar_t *path, unsigned *date, unsigned *time)
+static void file_stamp(const char *path, unsigned *date, unsigned *time)
 {
     WIN32_FILE_ATTRIBUTE_DATA fa;
     FILETIME lft;
     WORD d = 0, t = 0;
     *date = 0; *time = 0;
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fa))
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &fa))
         return;
     if (!FileTimeToLocalFileTime(&fa.ftLastWriteTime, &lft))
         return;
@@ -102,32 +102,32 @@ static unsigned root_used(Vol *v)
 static void show_space(Menu *m, Vol *v, int line)
 {
     menu_status(m, line, A_PLAIN,
-                L"   Image now holds %u of %u root entries, %u bytes free.",
+                "   Image now holds %u of %u root entries, %u bytes free.",
                 root_used(v), v->rootent, free_clusters(v) * v->clustersz);
 }
 
 /* питання в статусній області; повертає велику літеру з keys або 0 */
-static wchar_t ask_status(const wchar_t *keys)
+static char ask_status(const char *keys)
 {
     for (;;) {
-        wchar_t ch = 0;
+        char ch = 0;
         int k = get_key(&ch);
         if (k == K_ESC)
             return 0;
         if (k != K_CHAR)
             continue;
-        if (ch >= L'a' && ch <= L'z')
-            ch = (wchar_t)(ch - L'a' + L'A');
-        if (wcschr(keys, ch))
+        if (ch >= 'a' && ch <= 'z')
+            ch = (char)(ch - 'a' + 'A');
+        if (strchr(keys, ch))
             return ch;
     }
 }
 
 /* Записати вибраний файл в образ. 1 = записано (підсвічуємо сірим). */
-static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
+static int add_file(Vol *v, const char *dir, const char *imgfile,
                     MItem *e, Menu *m)
 {
-    wchar_t src[MAX_PATH];
+    char src[MAX_PATH];
     WIN32_FILE_ATTRIBUTE_DATA fa;
     char     raw[11];
     unsigned size, need, freec, fdate, ftime;
@@ -137,11 +137,11 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
 
     menu_status_clear(m);
 
-    _snwprintf(src, MAX_PATH - 1, L"%s\\%s", dir, e->name);
+    _snprintf(src, MAX_PATH - 1, "%s\\%s", dir, e->name);
     src[MAX_PATH - 1] = 0;
-    if (!GetFileAttributesExW(src, GetFileExInfoStandard, &fa)
+    if (!GetFileAttributesExA(src, GetFileExInfoStandard, &fa)
         || (fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        menu_status(m, 0, A_ERR, L"!! %s is gone from the folder.", e->disp);
+        menu_status(m, 0, A_ERR, "!! %s is gone from the folder.", e->disp);
         return 0;
     }
     size = fa.nFileSizeLow;
@@ -154,18 +154,18 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
         if (!dent_load(v, i, &d))
             continue;
         if (memcmp(d.raw, raw, 11) == 0) {
-            wchar_t c;
+            char c;
             menu_status(m, 0, A_ERR,
-                        L"!! %s is already inside %s (%u bytes).",
+                        "!! %s is already inside %s (%u bytes).",
                         d.name, imgfile, d.size);
             menu_status(m, 1, A_PLAIN,
-                        L"   R = replace it with the file on disk    C = cancel");
+                        "   R = replace it with the file on disk    C = cancel");
             menu_status(m, 2, A_PLAIN,
-                        L"   R = замени го с файла от диска          C = отказване");
-            c = ask_status(L"RC");
+                        "   R = замени го с файла от диска          C = отказване");
+            c = ask_status("RC");
             menu_status_clear(m);
-            if (c != L'R') {
-                menu_status(m, 0, A_PLAIN, L"   Cancelled, the image was not touched.");
+            if (c != 'R') {
+                menu_status(m, 0, A_PLAIN, "   Cancelled, the image was not touched.");
                 return 0;
             }
             /* нічого не звільняємо просто зараз: якщо новий файл не влізе
@@ -182,12 +182,12 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
     freec = free_clusters(v) + oldlen;      /* заміна віддає свої кластери назад */
     if (need > freec) {
         menu_status(m, 0, A_ERR,
-                    L"!! not enough room: %s needs %u bytes, only %u bytes are free.",
+                    "!! not enough room: %s needs %u bytes, only %u bytes are free.",
                     e->disp, size, freec * v->clustersz);
         menu_status(m, 1, A_PLAIN,
-                    L"   Use another image, or delete something from this one first.");
+                    "   Use another image, or delete something from this one first.");
         menu_status(m, 2, A_PLAIN,
-                    L"   Избери друг образ или изтрий нещо от този.");
+                    "   Избери друг образ или изтрий нещо от този.");
         return 0;
     }
     if (slot < 0) {
@@ -198,33 +198,33 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
     }
     if (slot < 0) {
         menu_status(m, 0, A_ERR,
-                    L"!! the root directory of %s is full: all %u entries are taken.",
+                    "!! the root directory of %s is full: all %u entries are taken.",
                     imgfile, v->rootent);
         menu_status(m, 1, A_PLAIN,
-                    L"   This floppy format has no room for more files.");
+                    "   This floppy format has no room for more files.");
         return 0;
     }
 
     /* ---- читаємо файл --------------------------------------------------- */
     if (size > 0) {
-        HANDLE f = CreateFileW(src, GENERIC_READ, FILE_SHARE_READ, NULL,
+        HANDLE f = CreateFileA(src, GENERIC_READ, FILE_SHARE_READ, NULL,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         DWORD got = 0;
         if (f == INVALID_HANDLE_VALUE) {
-            menu_status(m, 0, A_ERR, L"!! cannot read %s (code %lu)",
+            menu_status(m, 0, A_ERR, "!! cannot read %s (code %lu)",
                         e->disp, GetLastError());
             return 0;
         }
         buf = (unsigned char *)malloc(size);
         if (!buf) {
             CloseHandle(f);
-            menu_status(m, 0, A_ERR, L"!! out of memory");
+            menu_status(m, 0, A_ERR, "!! out of memory");
             return 0;
         }
         if (!ReadFile(f, buf, size, &got, NULL) || got != size) {
             CloseHandle(f);
             free(buf);
-            menu_status(m, 0, A_ERR, L"!! %s could not be read to the end", e->disp);
+            menu_status(m, 0, A_ERR, "!! %s could not be read to the end", e->disp);
             return 0;
         }
         CloseHandle(f);
@@ -259,14 +259,14 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
     }
 
     if (!vol_save(v)) {
-        menu_status(m, 0, A_ERR, L"!! WRITING %s FAILED (code %lu).",
+        menu_status(m, 0, A_ERR, "!! WRITING %s FAILED (code %lu).",
                     imgfile, GetLastError());
         menu_status(m, 1, A_ERR,
-                    L"   Check the image with Total Commander before using it.");
+                    "   Check the image with Total Commander before using it.");
         return 0;
     }
 
-    menu_status(m, 0, A_OK, L"   added %s to %s - %u bytes, %u cluster(s)",
+    menu_status(m, 0, A_OK, "   added %s to %s - %u bytes, %u cluster(s)",
                 e->disp, imgfile, size, need);
     show_space(m, v, 1);
     return 1;
@@ -274,18 +274,18 @@ static int add_file(Vol *v, const wchar_t *dir, const wchar_t *imgfile,
 
 int main(void)
 {
-    wchar_t dir[MAX_PATH], path[MAX_PATH];
-    wchar_t t1[160], t2[160], h1[160], h2[160];
+    char dir[MAX_PATH], path[MAX_PATH];
+    char t1[160], t2[160], h1[160], h2[160];
     Menu mi, mf;
     Vol  v;
     int  n, nf;
-    const wchar_t *err;
+    const char *err;
 
-    con_cp1251();
+    con_cp866();
     con_init();
 
     if (!exe_dir(dir, MAX_PATH)) {
-        say(L"!! cannot work out my own folder\r\n");
+        say("!! cannot work out my own folder\r\n");
         wait_key();
         con_done();
         return 1;
@@ -295,12 +295,12 @@ int main(void)
     n = collect_images(dir, images, MAXIMG);
     if (n == 0) {
         cls();
-        say(L"PACK - put files into an AGIE floppy image\r\n\r\n"
-            L"There is no .IMG file next to this program.\r\n"
-            L"PACK never creates an image - NEWIMG.EXE does that.\r\n\r\n"
-            L"Няма нито един .IMG до тази програма.\r\n"
-            L"Направи нов образ с NEWIMG.EXE.\r\n");
-        sayf(L"\r\nFolder: %s\r\n", dir);
+        say("PACK - put files into an AGIE floppy image\r\n\r\n"
+            "There is no .IMG file next to this program.\r\n"
+            "PACK never creates an image - NEWIMG.EXE does that.\r\n\r\n"
+            "Няма нито един .IMG до тази програма.\r\n"
+            "Направи нов образ с NEWIMG.EXE.\r\n");
+        sayf("\r\nFolder: %s\r\n", dir);
         wait_key();
         con_done();
         return 1;
@@ -309,13 +309,13 @@ int main(void)
     memset(&mi, 0, sizeof(mi));
     mi.it  = images;
     mi.n   = n;
-    mi.t1  = L"PACK - choose the image you want to put files into";
-    mi.t2  = L"Избери образа, в който ще слагаш файлове.";
-    mi.h1  = L"  Arrows = move   Right/Left = open/close the comment   "
-             L"Enter = choose   Esc = quit";
-    mi.h2  = L"  Стрелки = движение   Дясно/Ляво = целия коментар   "
-             L"Enter = избери   Esc = изход";
-    mi.btn = L"[  Quit  /  Изход  ]";
+    mi.t1  = "PACK - choose the image you want to put files into";
+    mi.t2  = "Избери образа, в който ще слагаш файлове.";
+    mi.h1  = "  Arrows = move   Right/Left = open/close the comment   "
+             "Enter = choose   Esc = quit";
+    mi.h2  = "  Стрелки = движение   Дясно/Ляво = целия коментар   "
+             "Enter = избери   Esc = изход";
+    mi.btn = "[  Quit  /  Изход  ]";
     mi.infow    = 16;      /* тільки дата: розмір в усіх образів однаковий */
     mi.showdone = 0;
 
@@ -332,20 +332,20 @@ int main(void)
             return 0;
         }
 
-        _snwprintf(path, MAX_PATH - 1, L"%s\\%s", dir, images[mi.sel].name);
+        _snprintf(path, MAX_PATH - 1, "%s\\%s", dir, images[mi.sel].name);
         path[MAX_PATH - 1] = 0;
 
         /* краще впертись у «тільки читання» зараз, ніж після всіх перевірок */
         {
-            HANDLE t = CreateFileW(path, GENERIC_WRITE, 0, NULL,
+            HANDLE t = CreateFileA(path, GENERIC_WRITE, 0, NULL,
                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if (t == INVALID_HANDLE_VALUE) {
                 menu_status_clear(&mi);
                 menu_status(&mi, 0, A_ERR,
-                            L"!! %s cannot be opened for writing (code %lu).",
+                            "!! %s cannot be opened for writing (code %lu).",
                             images[mi.sel].name, GetLastError());
                 menu_status(&mi, 1, A_PLAIN,
-                            L"   Read-only, or open in another program?");
+                            "   Read-only, or open in another program?");
                 continue;
             }
             CloseHandle(t);
@@ -353,7 +353,7 @@ int main(void)
         err = vol_open(path, &v);
         if (err) {
             menu_status_clear(&mi);
-            menu_status(&mi, 0, A_ERR, L"!! %s", err);
+            menu_status(&mi, 0, A_ERR, "!! %s", err);
             vol_close(&v);
             continue;
         }
@@ -365,24 +365,24 @@ int main(void)
     if (nf == 0) {
         cursor_on();
         cls();
-        sayf(L"No file next to this program can go into %s.\r\n"
-             L"Няма подходящ файл до тази програма.\r\n\r\n"
-             L"A file is taken only if its name fits the DOS 8.3 rules and it is\r\n"
-             L"not bigger than 360 KB.\r\n", images[mi.sel].name);
+        sayf("No file next to this program can go into %s.\r\n"
+             "Няма подходящ файл до тази програма.\r\n\r\n"
+             "A file is taken only if its name fits the DOS 8.3 rules and it is\r\n"
+             "not bigger than 360 KB.\r\n", images[mi.sel].name);
         print_name_rules();
-        sayf(L"\r\nFolder: %s\r\n", dir);
+        sayf("\r\nFolder: %s\r\n", dir);
         wait_key();
         vol_close(&v);
         con_done();
         return 1;
     }
 
-    _snwprintf(t1, 159, L"PACK - Enter puts the file into %s", images[mi.sel].name);
-    _snwprintf(t2, 159, L"Enter записва файла в %s. Сивите са вече добавени.",
+    _snprintf(t1, 159, "PACK - Enter puts the file into %s", images[mi.sel].name);
+    _snprintf(t2, 159, "Enter записва файла в %s. Сивите са вече добавени.",
                images[mi.sel].name);
-    _snwprintf(h1, 159, L"  Arrows = move    Enter = put into the image    "
-                        L"Esc = finish");
-    _snwprintf(h2, 159, L"  Стрелки = движение    Enter = запиши    Esc = край");
+    _snprintf(h1, 159, "  Arrows = move    Enter = put into the image    "
+                        "Esc = finish");
+    _snprintf(h2, 159, "  Стрелки = движение    Enter = запиши    Esc = край");
 
     memset(&mf, 0, sizeof(mf));
     mf.it  = files;
@@ -391,7 +391,7 @@ int main(void)
     mf.t2  = t2;
     mf.h1  = h1;
     mf.h2  = h2;
-    mf.btn = L"[  Finish  /  Готово  ]";
+    mf.btn = "[  Finish  /  Готово  ]";
     mf.infow    = 31;      /* розмір і дата: у файлів вони різні й потрібні */
     mf.showdone = 1;
 
@@ -412,7 +412,7 @@ int main(void)
     vol_close(&v);
     cursor_on();
     cls();
-    say(L"Done.  Готово.\r\n");
+    say("Done.  Готово.\r\n");
     con_done();
     return 0;
 }
