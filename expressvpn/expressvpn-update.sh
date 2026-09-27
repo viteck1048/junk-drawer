@@ -68,20 +68,26 @@ chmod +x "$PKG"
 echo "Extracted OK. Applying update (sudo required)..."
 
 sudo systemctl stop expressvpn 2>/dev/null || true
+# If anything below fails, don't leave the VPN daemon stopped.
+trap 'echo "Update failed -- restarting the old daemon." >&2; sudo systemctl start expressvpn' ERR
+
+# A running GUI client keeps its binary busy ("Text file busy" on cp).
+pkill -x expressvpn-client 2>/dev/null || true
 
 sudo groupadd -f expressvpn
 sudo groupadd -f expressvpnhnsd
 
 sudo mkdir -p /opt/expressvpn/{bin,etc,var,share,lib,plugins,qml}
-sudo cp -r "$WORKDIR"/x64/expressvpnfiles/* /opt/expressvpn/
+# --remove-destination: unlink first, so a still-running binary is not an obstacle
+sudo cp -r --remove-destination "$WORKDIR"/x64/expressvpnfiles/* /opt/expressvpn/
 sudo cp "$WORKDIR"/x64/installfiles/*.sh /opt/expressvpn/bin/
 sudo chmod +x /opt/expressvpn/bin/*.sh
 
 sudo setcap 'cap_net_bind_service=+ep' /opt/expressvpn/bin/expressvpn-unbound
 
-mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/256x256/apps"
-cp "$WORKDIR"/x64/installfiles/expressvpn.desktop "$HOME/.local/share/applications/expressvpn.desktop"
-cp "$WORKDIR"/x64/installfiles/app-icon.png "$HOME/.local/share/icons/hicolor/256x256/apps/expressvpn.png"
+# sudo install -o: overwrites (and re-owns) copies a past root install left behind
+sudo install -D -o "$(id -u)" -g "$(id -g)" -m 644 "$WORKDIR"/x64/installfiles/expressvpn.desktop "$HOME/.local/share/applications/expressvpn.desktop"
+sudo install -D -o "$(id -u)" -g "$(id -g)" -m 644 "$WORKDIR"/x64/installfiles/app-icon.png "$HOME/.local/share/icons/hicolor/256x256/apps/expressvpn.png"
 
 sudo mkdir -p /etc/NetworkManager/conf.d
 echo -e "[keyfile]\nunmanaged-devices=interface-name:wgexpressvpn*" | sudo tee /etc/NetworkManager/conf.d/wgexpressvpn.conf > /dev/null
@@ -95,6 +101,7 @@ sudo cp "$WORKDIR"/x64/installfiles/expressvpn-service.service /etc/systemd/syst
 sudo systemctl daemon-reload
 sudo systemctl enable expressvpn
 sudo systemctl start expressvpn
+trap - ERR
 
 sleep 2
 echo "---"
